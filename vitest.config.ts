@@ -2,7 +2,7 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-	root: path.resolve(__dirname),
+	root: path.resolve(import.meta.dirname),
 	test: {
 		include: [
 			"scripts/nocobase/**/*.{test,spec}.{js,ts}",
@@ -39,9 +39,9 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			"@generators": path.resolve(__dirname, "./scripts/nocobase/src/"),
-			"@shared/types": path.resolve(__dirname, "./scripts/nocobase/types.ts"),
-			"@shared": path.resolve(__dirname, "./scripts/nocobase/src/"),
+			"@generators": path.resolve(import.meta.dirname, "./scripts/nocobase/src/"),
+			"@shared/types": path.resolve(import.meta.dirname, "./scripts/nocobase/types.ts"),
+			"@shared": path.resolve(import.meta.dirname, "./scripts/nocobase/src/"),
 		},
 	},
 });
