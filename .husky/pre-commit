@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$SCRIPT_DIR/../scripts/lib/shared.sh"
+cd "$(repo_root)"
+
+
+# Gate de segredos (gitleaks) nos arquivos staged.
+run_pm run secrets:check -- --staged
+
+
+printf '%sRunning CASA docs-check%s\n' "$(color 1 36)" "$(color 1 0)"
+exec "$(git rev-parse --show-toplevel)/scripts/pre-commit"
+
+
+printf '%sRunning staged checks%s\n' "$(color 1 36)" "$(color 1 0)"
+run_pm run lint-staged

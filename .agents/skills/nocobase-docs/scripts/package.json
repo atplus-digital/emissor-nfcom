@@ -1,0 +1,14 @@
+{
+	"name": "nocobase-docs-client",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"start": "tsx nocobase-client.ts",
+		"check": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"tsx": "^4.21.0",
+		"typescript": "^6.0.2"
+	}
+}

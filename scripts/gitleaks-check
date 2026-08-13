@@ -1,0 +1,30 @@
+#!/bin/sh
+# gitleaks-check — gate de segredos (gitleaks).
+# Ferramenta ausente → aviso e segue; o CI cobre o repo inteiro.
+#
+# Uso: sh scripts/gitleaks-check [--staged]
+#   --staged  varre apenas os arquivos staged (usado pelo pre-commit)
+#   (sem flag) varre o repo inteiro
+# Requer: gitleaks no PATH (opcional — sem ele o gate é pulado com aviso).
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$SCRIPT_DIR/lib/shared.sh"
+cd "$(repo_root)"
+
+case "${1:-}" in
+	--staged) STAGED=1 ;;
+	"") STAGED=0 ;;
+	*) printf 'Uso: %s [--staged]\n' "$0" >&2; exit 2 ;;
+esac
+
+if command -v gitleaks >/dev/null 2>&1; then
+	if [ "$STAGED" -eq 1 ]; then
+		gitleaks protect --staged --redact
+	else
+		gitleaks protect --redact
+	fi
+else
+	printf '%sAVISO: gitleaks não encontrado no PATH — varredura de segredos pulada (CI cobre).%s\n' \
+		"$(color 2 33)" "$(color 2 0)" >&2
+fi

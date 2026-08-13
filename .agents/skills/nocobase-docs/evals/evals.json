@@ -1,0 +1,44 @@
+{
+	"skill_name": "nocobase-docs",
+	"evals": [
+		{
+			"id": 1,
+			"prompt": "I need to understand what collections exist in our NocoBase CRM and what fields the t_pessoas collection has. Can you look that up?",
+			"expected_output": "The agent should use the nocobase-docs skill to run 'collections' to list all collections, then 'collections --name=t_pessoas' to get the fields. Should present the collection list and field details clearly.",
+			"files": [],
+			"expectations": [
+				"The agent invokes the nocobase-docs skill and runs the nocobase-client.ts script",
+				"The agent runs 'collections' command to list all collections",
+				"The agent runs 'collections --name=t_pessoas' to get field details",
+				"The output includes a list of collections and the fields of t_pessoas",
+				"The agent does NOT attempt to use curl or fetch directly"
+			]
+		},
+		{
+			"id": 2,
+			"prompt": "Show me a few sample records from t_negocios so I can understand the data structure. Also tell me how many records are in that collection.",
+			"expected_output": "The agent should use the nocobase-docs skill to run 'count t_negocios' and 'list t_negocios --page=1 --pageSize=5' to get a sample. Should present both the count and sample records.",
+			"files": [],
+			"expectations": [
+				"The agent invokes the nocobase-docs skill and runs the nocobase-client.ts script",
+				"The agent runs 'count t_negocios' to get the total number of records",
+				"The agent runs 'list t_negocios --page=1 --pageSize=5' (or similar pagination) to get sample records",
+				"The output includes both a count and sample records",
+				"The agent does NOT attempt to use curl or fetch directly"
+			]
+		},
+		{
+			"id": 3,
+			"prompt": "I'm writing a TypeScript integration for the CRM and need to understand the API endpoints available for the t_atividades collection. What endpoints exist and what do they accept?",
+			"expected_output": "The agent should use the nocobase-docs skill to run 'swagger --ns=collections/t_atividades' to get the API spec for that collection. Should present the endpoints, parameters, and response shapes in a way useful for a developer writing an integration.",
+			"files": [],
+			"expectations": [
+				"The agent invokes the nocobase-docs skill and runs the nocobase-client.ts script",
+				"The agent runs 'swagger --ns=collections/t_atividades' (or similar) to get API details",
+				"The output describes the available endpoints for t_atividades",
+				"The output includes information about parameters and response shapes",
+				"The agent does NOT attempt to use curl or fetch directly"
+			]
+		}
+	]
+}
