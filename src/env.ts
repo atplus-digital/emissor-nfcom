@@ -40,8 +40,8 @@ const _env = createEnv({
 		
 		// Defaults fiscais (SPEC-0002; revisar com contador)
 		FISCAL_CFOP_DEFAULT: z.string().default("6102"),
-		FISCAL_CCLASS_DEFAULT: z.string(),
-		FISCAL_ICMS_ALIQUOTA: z.coerce.number().min(0).max(1),
+		FISCAL_CCLASS_DEFAULT: z.string().min(1),
+		FISCAL_ICMS_ALIQUOTA: z.coerce.number().min(0).max(1).default(0),
 	},
 
 	/**
