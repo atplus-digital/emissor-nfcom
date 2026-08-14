@@ -113,7 +113,7 @@ com retry/backoff do BullMQ. Sem isso, a transação local "job-state + outbox" 
 não teria quem a drenasse.
 
 **Rate-limit por gateway**: configurado por variáveis de ambiente com defaults
-conservadores (`RATE_LIMIT_ASAS`, `RATE_LIMIT_NFCOM`, `RATE_LIMIT_ATACADO` em req/s),
+conservadores (`RATE_LIMIT_ASAAS`, `RATE_LIMIT_NFCOM`, `RATE_LIMIT_ATACADO` em req/s),
 validadas por Zod (`@t3-oss/env-core`, ADR-0005). Defaults ajustados em produção conforme
 observação de 429s. Cada fila BullMQ usa o rate-limiter nativo com o valor da env
 correspondente.
@@ -150,8 +150,8 @@ múltiplas instâncias exige migrar o store de coordenação (Postgres) — ADR 
 test -d src/http && (grep -rn "queue.add\|\.add(" src/http/ | grep -i emit | wc -l | grep -qv '^0$' || exit 1)
 # Filas e workers existem; inclui a fila outbox e rate-limit por gateway.
 test -d src/queue && (grep -rn "new Queue\|new Worker" src/queue/ | wc -l | grep -qv '^0$' || exit 1)
-# Rate-limit por gateway declarado no schema de env (RATE_LIMIT_ASAS/NFCOM/ATACADO).
-grep -rn "RATE_LIMIT_ASAS\|RATE_LIMIT_NFCOM\|RATE_LIMIT_ATACADO" src/env.ts src/env/ 2>/dev/null | wc -l | grep -qv '^0$' || exit 1
+# Rate-limit por gateway declarado no schema de env (RATE_LIMIT_ASAAS/NFCOM/ATACADO).
+grep -rn "RATE_LIMIT_ASAAS\|RATE_LIMIT_NFCOM\|RATE_LIMIT_ATACADO" src/env.ts src/env/ 2>/dev/null | wc -l | grep -qv '^0$' || exit 1
 # Fila outbox existe (drena o outbox do ADR-0003).
 grep -rn "outbox" src/queue/ | wc -l | grep -qv '^0$' || exit 1
 ```
@@ -160,5 +160,5 @@ grep -rn "outbox" src/queue/ | wc -l | grep -qv '^0$' || exit 1
 
 - O contrato de eventos da NFCom (cancelamento/substituição) também vira jobs
   (`cancel-nfcom`) na mesma estrutura de filas.
-- A máquina de estados da fatura (`criada → a-emitir → emitindo → emitida | parcial | erro`)
+- A máquina de estados da fatura (`a-emitir → emitindo → emitida | parcial | erro`)
   é **atualizada pelo worker**, não pelo handler HTTP.

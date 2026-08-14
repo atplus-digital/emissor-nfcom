@@ -36,7 +36,7 @@ com idempotência/outbox (SQLite). Stack: Bun + Hono + Drizzle + Zod 4. Interno 
 cp .env.example .env            # preencher keys (Asaas, NFCom, Atacado...)
 bun install
 docker run -d -p 6379:6379 redis:7   # Redis local p/ BullMQ
-bun run scripts/migrate.ts      # cria/migra o SQLite de coordenação
+bunx drizzle-kit migrate         # cria/migra o SQLite de coordenação
 bun run dev                     # Hono :3000 + workers (bun --watch)
 ```
 
@@ -44,13 +44,13 @@ bun run dev                     # Hono :3000 + workers (bun --watch)
 
 ```bash
 bun run typecheck        # exit 0
-bun test                 # tudo verde
+bun run test             # tudo verde (bun test --isolate, script canônico)
 ```
 
 ## Como deployar
 
 - `docker build` → imagem `oven/bun` (build em 2 stages; bundle autocontido em
-  `dist/`). O CMD roda `scripts/migrate.ts` (idempotente) antes do server.
+  `dist/`). O CMD roda `bunx drizzle-kit migrate` (idempotente) antes do server.
 - **Obrigatório**: volume persistente em `/app/data` (SQLite de coordenação — perdê-lo
   = perder a garantia anti-duplicação de boletos/notas, ADR-0003) e `REDIS_URL`
   apontando para um Redis durável (BullMQ perde jobs em Redis volátil, ADR-0002).

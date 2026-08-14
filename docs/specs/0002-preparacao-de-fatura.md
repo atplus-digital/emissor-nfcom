@@ -37,7 +37,7 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
    - **Existe, status ∈ {`emitindo`, `emitida`, `parcial`, `erro`}** → `409 Conflict`
      (fatura já entrou na emissão; a árvore pode ter IDs externos — não é seguro
      recriar).
-   - **Existe, status ∈ {`criada`, `a-emitir`}** → modo **atualização**: remove a
+   - **Existe, status = `a-emitir`** → modo **atualização**: remove a
      árvore antiga (itens → notas → cobranças; a fatura é reutilizada) e recria a
      árvore nova. Retorna `200 OK` (não 201).
 3. **Leitura de domínio (Atacado, ADR-0004)**: em paralelo, lê:
@@ -62,7 +62,7 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
    ordem, pela porta do módulo Atacado: `fatura` (se criação) → `cobrança` →
    `nota` → `itens da nota`. Em falha em qualquer etapa, remove as entidades já
    criadas na árvore (itens → notas → cobranças → fatura, se criação) e propaga o
-   erro. A fatura fica `criada`; cobranças e notas ficam `a-emitir`.
+   erro. A fatura fica `a-emitir`; cobranças e notas ficam `a-emitir`.
 8. **Resposta**: `201 Created` (criação) ou `200 OK` (atualização) com a árvore criada
    em termos de domínio (centavos inteiros, ADR-0004).
 
@@ -81,7 +81,7 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
 // response (201 criação / 200 atualização)
 {
   "faturaId": 101,
-  "status": "criada",
+  "status": "a-emitir",
   "dataReferencia": "2026-08-01",
   "dataVencimento": "2026-08-10",
   "valorTotal": 123456,
@@ -120,8 +120,8 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
   ADR-0004). A fronteira do módulo Atacado converte o número em unidade real do CRM
   (`123.45`, conforme tipos gerados) ↔ centavos, com arredondamento determinístico.
 - `tipoFaturamento` ∈ {`parceiro`, `via-parceiro`, `cofaturamento`, `cliente-final`}.
-- Status da fatura após preparação: `criada`. Status de cobranças/notas: `a-emitir`.
-  (A transição `criada → emitindo` é da SPEC-0001.)
+- Status da fatura após preparação: `a-emitir`. Status de cobranças/notas: `a-emitir`.
+  (A transição `a-emitir → emitindo` é da SPEC-0001; a fatura nasce `a-emitir`.)
 
 ### Garantias de cardinalidade por `tipoFaturamento`
 
@@ -170,7 +170,7 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
 | 3   | não há planos de serviço cadastrados no Atacado                                           | `422` com `Planos de serviço não encontrados`                                                                     |
 | 4   | o documento (CPF/CNPJ) do devedor ou de algum destinatário de nota tem dígito verificador inválido | `422` antes de persistir (pipeline de documentos, ADR-0004); não cria a árvore                                  |
 | 5   | re-POST com `(parceiro, ref)` de fatura em `emitindo`/`emitida`/`parcial`/`erro`           | `409 Conflict` (fatura já entrou na emissão; árvore pode ter IDs externos). Fatura em `erro` **exige descarte** — o caminho de correção é cancelar/descartar a fatura e preparar outra, não re-preparar |
-| 6   | re-POST com `(parceiro, ref)` de fatura em `criada`/`a-emitir` (com qualquer `tipoFaturamento`) | **atualizar**: remover a árvore antiga (itens→notas→cobranças) e recriar conforme o novo tipo; retornar `200 OK` com a nova árvore |
+| 6   | re-POST com `(parceiro, ref)` de fatura em `a-emitir` (com qualquer `tipoFaturamento`) | **atualizar**: remover a árvore antiga (itens→notas→cobranças) e recriar conforme o novo tipo; retornar `200 OK` com a nova árvore |
 | 7   | a persistência falha no meio (ex.: fatura criada, mas erro ao criar a 3ª cobrança)         | remover as entidades já criadas na árvore (rollback manual: itens→notas→cobranças→fatura, se criação) e propagar o erro (5xx/`RETRYABLE`) |
 | 8   | `tipoFaturamento` fora do enum, ou `dataReferencia` inválida, ou `parceiroId` ≤ 0          | `422` (Zod, validação de schema)                                                                                   |
 | 9   | um cliente ativo tem linhas cujo plano não existe ou preço zero                           | descartar as linhas inválidas do cliente; se o cliente ficar sem linhas, ele não entra no cálculo (caso 2 se todos ficarem) |
@@ -206,7 +206,7 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
   falha — **não** via outbox. O outbox (ADR-0003) é para *atualizações de estado de
   emissão*; a criação da árvore é *domínio* e a resposta `201` precisa dos IDs criados
   agora. A idempotência por chave natural cobre o replay por crash (re-POST encontra a
-  fatura `criada` e atualiza).
+  fatura `a-emitir` e atualiza).
 - **Unidade monetária**: centavos inteiros no domínio (ADR-0004); número em unidade
   real (formato dos tipos gerados) só existe no módulo Atacado, convertido na
   fronteira com arredondamento determinístico.
@@ -239,7 +239,7 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
 ```bash
 bun run typecheck                 # exit 0
 # cada caso de borda tem teste nomeado que o exercita:
-bun test src/preparation          # casos 1-13 — N/N verdes
+bun run test test/preparation      # casos 1-13 — N/N verdes
 # a cardinalidade por TipoFaturamento é exercida por tipo:
 # (um teste por tipo: parceiro/via-parceiro/cofaturamento/cliente-final)
 # valores monetários no domínio são centavos inteiros (ADR-0004) — número em unidade

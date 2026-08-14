@@ -128,10 +128,10 @@ exaurir tentativas (o cliente reconsulta via `GET`). A URL alvo é a env `WEBHOO
 }
 ```
 
-Status possíveis da fatura (`f_status`, conforme enum do CRM): `criada`, `a-emitir`,
+Status possíveis da fatura (`f_status`, conforme enum do CRM): `a-emitir`,
 `emitindo`, `emitida`, `parcial`, `erro` (os estados `pago`/`cancelada` de fatura são
-fora deste ciclo — SPEC futura de cancelamento; a transição `criada → a-emitir →
-emitindo` é da SPEC-0002/emissão).
+fora deste ciclo — SPEC futura de cancelamento; a transição `a-emitir →
+emitindo` é da SPEC-0001; o estado inicial `a-emitir` vem da preparação, SPEC-0002).
 Status possíveis da NFCom — **dois campos**:
 - `f_status_interno` (máquina interna, conforme enum do CRM): `a-emitir`, `emitida`,
   `erro`, `cancelada`.
@@ -181,7 +181,7 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 - **URL de webhook**: env `WEBHOOK_URL` global por ambiente (ADR-0005); sem URL
   configurada, o evento não é empurrado (caso 14).
 - **Rate-limit por gateway**: configurado por variáveis de ambiente com defaults
-  conservadores (decisão canônica no ADR-0002; ex.: `RATE_LIMIT_ASAS`,
+  conservadores (decisão canônica no ADR-0002; ex.: `RATE_LIMIT_ASAAS`,
   `RATE_LIMIT_NFCOM`, `RATE_LIMIT_ATACADO` em req/s), ajustado em produção conforme
   observação de 429s.
 - **Unidade monetária no domínio**: centavos inteiros (ADR-0004) — a fronteira do módulo
@@ -194,8 +194,8 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 ```bash
 bun run typecheck                 # exit 0
 # cada caso de borda tem teste nomeado que o exercita:
-bun test src/emission            # casos 1-11 (emissão) — N/N verdes
-bun test src/webhook              # casos 12,13,14 (webhook) — N/N verdes
+bun run test test/emission        # casos 1-11 (emissão) — N/N verdes
+bun run test test/webhook         # casos 12,13,14 (webhook) — N/N verdes
 # job de emissão enfileira (não executa síncrono) — ADR-0002
 test -d src/http && (grep -rn "queue.add\|\.add(" src/http/ | grep -i emit | wc -l | grep -qv '^0$' || exit 1)
 # nenhum boleto/nota é emitido sem consulta à idempotency key — ADR-0003
