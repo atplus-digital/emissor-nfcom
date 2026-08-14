@@ -30,9 +30,10 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
 1. **Disparo**: `POST /faturas/preparar` valida o body (`parceiroId` > 0,
    `dataReferencia` em formato de data, `tipoFaturamento` ∈ enum) e executa
    **síncrono** (não enfileira job — a emissão, sim, é assíncrona, SPEC-0001/ADR-0002).
-2. **Resolução de existente (idempotência)**: consulta a fatura por
-   `(parceiroId, dataReferencia)` (chave natural) via porta do módulo Atacado
-   (ADR-0004).
+2. **Resolução de existente (idempotência)**: **normaliza** `dataReferencia` para o 1º dia
+   do mês (`YYYY-MM-01` — `2026-08-15` e `2026-08-01` são a mesma fatura, mesma chave
+   natural) e consulta a fatura por `(parceiroId, dataReferencia)` (chave natural) via
+   porta do módulo Atacado (ADR-0004).
    - **Não existe** → modo **criação**.
    - **Existe, status ∈ {`emitindo`, `emitida`, `parcial`, `erro`}** → `409 Conflict`
      (fatura já entrou na emissão; a árvore pode ter IDs externos — não é seguro
@@ -50,7 +51,8 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
    Atacado é desmascarado antes de validar.
 5. **Cálculo**: processa as linhas de cada cliente (descarta linhas sem plano/preço
    zero); totaliza por cliente; agrupa serviços; calcula o total da fatura; calcula a
-   data de vencimento (dia do parceiro, ou default se o parceiro não o definir). Se
+   data de vencimento (dia do parceiro, ou default se o parceiro não o definir) sobre o
+   **mês seguinte** ao da `dataReferencia` (fatura de agosto vence em setembro). Se
    todos os clientes ficarem sem linhas válidas → `422`.
 6. **Plano de cobranças**: constrói o plano conforme `tipoFaturamento` (tabela de
    cardinalidade abaixo). Cada cobrança tem um devedor e 1..N notas (destinatários);
@@ -83,7 +85,7 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
   "faturaId": 101,
   "status": "a-emitir",
   "dataReferencia": "2026-08-01",
-  "dataVencimento": "2026-08-10",
+  "dataVencimento": "2026-09-10",
   "valorTotal": 123456,
   "tipoFaturamento": "cofaturamento",
   "cobrancas": [
@@ -120,6 +122,9 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
   ADR-0004). A fronteira do módulo Atacado converte o número em unidade real do CRM
   (`123.45`, conforme tipos gerados) ↔ centavos, com arredondamento determinístico.
 - `tipoFaturamento` ∈ {`parceiro`, `via-parceiro`, `cofaturamento`, `cliente-final`}.
+- `dataReferencia` aceita qualquer dia do mês e é **normalizada para o 1º dia** na chave
+  natural e na resposta; `dataVencimento` = dia de vencimento do parceiro (default 10)
+  sobre o **mês seguinte** ao da referência (ref `2026-08-xx` → vence `2026-09-10`).
 - Status da fatura após preparação: `a-emitir`. Status de cobranças/notas: `a-emitir`.
   (A transição `a-emitir → emitindo` é da SPEC-0001; a fatura nasce `a-emitir`.)
 
@@ -174,10 +179,11 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
 | 7   | a persistência falha no meio (ex.: fatura criada, mas erro ao criar a 3ª cobrança)         | remover as entidades já criadas na árvore (rollback manual: itens→notas→cobranças→fatura, se criação) e propagar o erro (5xx/`RETRYABLE`) |
 | 8   | `tipoFaturamento` fora do enum, ou `dataReferencia` inválida, ou `parceiroId` ≤ 0          | `422` (Zod, validação de schema)                                                                                   |
 | 9   | um cliente ativo tem linhas cujo plano não existe ou preço zero                           | descartar as linhas inválidas do cliente; se o cliente ficar sem linhas, ele não entra no cálculo (caso 2 se todos ficarem) |
-| 10  | o parceiro não define dia de vencimento                                                   | usar o dia de vencimento default (**dia 10**); calcular a data de vencimento sobre a `dataReferencia`   |
+| 10  | o parceiro não define dia de vencimento                                                   | usar o dia de vencimento default (**dia 10**) sobre o **mês seguinte** ao da `dataReferencia` (ref `2026-08-01` → vence `2026-09-10`) |
 | 11  | a soma dos `valorTotal` das cobranças diverge do `valorTotal` da fatura além de 1 centavo | trata-se como erro interno de cálculo (não deveria ocorrer); falhar a preparação antes de persistir (`500` defensivo) |
 | 12  | `via-parceiro` e `cofaturamento` produzem a mesma árvore para os mesmos dados             | aceito: cardinalidade idêntica hoje (ver Garantias); o valor de enum é preservado em `tipoFaturamento`              |
 | 13  | o destinatário de uma nota não tem endereço completo no cadastro (logradouro, número, bairro, CEP, cidade ou UF ausente) | `422` antes de persistir (`Destinatário {nome} sem endereço completo para emissão da NFCom`) |
+| 14  | re-POST com `(parceiro, ref)` de fatura em `pago`/`cancelada` (estados do CRM fora do ciclo de emissão) | `409 Conflict` — mesma regra do caso 5 (árvore pode ter IDs externos/efeitos fiscais); o caminho é cancelar/descartar (SPEC-0003), não re-preparar |
 
 ## Questões em aberto
 
@@ -187,8 +193,8 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
       definir a divergência (ex.: `cofaturamento` particiona o total entre parceiro e
       AT+, ou gera nota adicional ao parceiro), atualizar a tabela de Garantias.
 - [ ] Fluxo de **descarte/cancelamento de fatura** (necessário para o caso 5: fatura em
-      `erro` exige descarte antes de re-preparar): fora do primeiro ciclo — SPEC
-      futura (id a reservar), junto com o cancelamento de NFCom da SPEC-0001.
+      `erro` exige descarte antes de re-preparar): fora do primeiro ciclo — **SPEC-0003**
+      (reservada no BACKLOG), junto com o cancelamento de NFCom da SPEC-0001.
 
 ## Decisões fechadas nesta spec
 
@@ -196,11 +202,14 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
   criada (`201`/`200`). Não cria job BullMQ — a emissão (SPEC-0001) é o fluxo
   assíncrono (ADR-0002). A resposta precisa dos IDs criados imediatamente.
 - **Idempotência por chave natural**: `(parceiroId, dataReferencia)` é a chave de
-  dedup — `tipoFaturamento` **não** faz parte da chave: um re-POST com tipo diferente
-  numa fatura ainda não emitida **troca o tipo** (remove + recria a árvore conforme o
-  novo tipo). Re-preparo de fatura emitida/emissão é **recusado** (`409`). Consistente
-  com o rigor de ADR-0003 (sem duplicação por re-POST), sem usar o store de
-  idempotência de emissão (que é para boleto/nota, não para criação de domínio).
+  dedup, com `dataReferencia` **normalizada para o 1º dia do mês** (`YYYY-MM-01`) antes
+  do lookup — `tipoFaturamento` **não** faz parte da chave: um re-POST com tipo
+  diferente numa fatura ainda não emitida **troca o tipo** (remove + recria a árvore
+  conforme o novo tipo). Re-preparo de fatura que entrou na emissão
+  (`emitindo`/`emitida`/`parcial`/`erro`) ou está em `pago`/`cancelada` é **recusado**
+  (`409`, casos 5/14). Consistente com o rigor de ADR-0003 (sem duplicação por re-POST),
+  sem usar o store de idempotência de emissão (que é para boleto/nota, não para criação
+  de domínio).
 - **Persistência direta com rollback manual** (desvio explícito de ADR-0003): a
   preparação escreve a árvore **diretamente** no Atacado, com rollback manual em
   falha — **não** via outbox. O outbox (ADR-0003) é para *atualizações de estado de
@@ -215,14 +224,15 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
   distintos (podem divergir no futuro), com cardinalidade idêntica por enquanto.
 - **Fatura em `erro` exige descarte**: não há re-preparo de fatura que entrou na
   emissão e falhou por completo — o caminho de correção é descartar a fatura e
-  preparar outra (fluxo de descarte é SPEC futura; casos 5).
+  preparar outra (fluxo de descarte é **SPEC-0003**, reservada no BACKLOG; casos 5).
 - **Rollback da atualização é best-effort**: na recriação da árvore (caso 6), se a
   remoção da árvore antiga falhar parcialmente, o sistema registra o erro em log
   (pino) e prossegue com a recriação — resíduos da árvore antiga são órfãos sem IDs
   externos (a fatura ainda não entrou na emissão), inócuos à emissão. O rollback da
   **criação** (caso 7) permanece estrito: falha na criação aborta e remove tudo.
 - **Dia de vencimento default = 10**: constante de domínio `DIA_VENCIMENTO_DEFAULT`
-  (dia 10 do mês da `dataReferencia`).
+  (dia 10 do **mês seguinte** ao da `dataReferencia` — fatura de agosto vence em
+  setembro; caso 10).
 - **Defaults fiscais via ambiente**: CFOP/cClass default e alíquota de ICMS por estado
   vêm de variáveis de ambiente (`FISCAL_CFOP_DEFAULT`, `FISCAL_CCLASS_DEFAULT`,
   `FISCAL_ICMS_ALIQUOTA`, em env validada por Zod — ADR-0005), não hardcoded. Valores
@@ -244,21 +254,21 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
 ```bash
 bun run typecheck                 # exit 0
 # cada caso de borda tem teste nomeado que o exercita:
-bun run test test/preparation      # casos 1-13 — N/N verdes
+bun run test test/preparation      # casos 1-14 — N/N verdes
 # a cardinalidade por TipoFaturamento é exercida por tipo:
 # (um teste por tipo: parceiro/via-parceiro/cofaturamento/cliente-final)
 # valores monetários no domínio são centavos inteiros (ADR-0004) — número em unidade
 # real não vaza do módulo Atacado (conversão só no translator):
-test -d src/preparation && (grep -rn "100\b" src/preparation/ --include='*.ts' \
+test -d src/domain/fatura && (grep -rn "100\b" src/domain/fatura/ --include='*.ts' \
   | grep -iE "valor|total|pre[çc]o|price|cents|centavos" | grep -v ".test." \
   | grep -v "translat" && exit 1 || true)
 # o documento do devedor/destinatário é validado (dígito) antes de persistir
 # (ADR-0004 pipeline, caso 4):
-test -d src/preparation && (grep -rn "createFatura\|createCobranca\|createNFCom\|create " \
-  src/preparation/ --include='*.ts' | grep -v "valid\|document\|cpf\|cnpj" \
+test -d src/domain/fatura && (grep -rn "createFatura\|createCobranca\|createNFCom\|create " \
+  src/domain/fatura/ --include='*.ts' | grep -v "valid\|document\|cpf\|cnpj" \
   | grep -v ".test." && exit 1 || true)
 # nenhuma preparação enfileira job de emissão (a emissão é SPEC-0001, disparada à parte):
-test -d src/preparation && (grep -rn "queue.add\|\.add(" src/preparation/ \
+test -d src/domain/fatura && (grep -rn "queue.add\|\.add(" src/domain/fatura/ \
   --include='*.ts' | grep -iE "emit|fatura" | grep -v ".test." && exit 1 || true)
 ```
 
@@ -269,7 +279,8 @@ upsert/409: `test/preparation/upsert.test.ts`); 7 (rollback:
 9, 10 (linhas inválidas / vencimento default: `test/preparation/calculation.test.ts`);
 11 (consistência do total); 12 (via-parceiro ≡ cofaturamento:
 `test/preparation/billing-plan.test.ts`); 13 (endereço incompleto:
-`test/preparation/validation.test.ts`). Os caminhos de teste são a convenção alvo;
+`test/preparation/validation.test.ts`); 14 (pago/cancelada:
+`test/preparation/upsert.test.ts`). Os caminhos de teste são a convenção alvo;
 ausência do `src/` antes da implementação não invalida o `status: draft`.
 
 ## Revisão humana
@@ -279,6 +290,8 @@ ausência do `src/` antes da implementação não invalida o `status: draft`.
 - Valores das envs fiscais (`FISCAL_CFOP_DEFAULT`, `FISCAL_CCLASS_DEFAULT`,
   `FISCAL_ICMS_ALIQUOTA`) — confirmar com contador antes de produzir (herda
   SPEC-0001); o mecanismo (env) já está decidido.
+- Vencimento no **mês seguinte** ao da referência (decisão desta revisão) — confirmar
+  com o negócio se vale para todos os casos (ex.: primeira fatura de um cliente).
 - Volume: para parceiros com centenas de clientes, a criação síncrona da árvore
   pode ser lenta. Avaliar se a resposta 201 sob timeout HTTP (ex.: 30s) é suficiente,
   ou se a preparação precisa virar assíncrona no futuro (caso 1 do AskUserQuestion

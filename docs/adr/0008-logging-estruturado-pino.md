@@ -88,7 +88,8 @@ Custo: uma condição no factory do logger.
 **Negativas:**
 - ALS é implícito — mitigado por convenção: contexto novo entra no store,
   nunca como campo avulso no call site.
-- `pino-pretty` é dependência de dev a mais.
+- `pino-pretty` é dependência de dev a mais (adicioná-la como devDependency no
+  primeiro commit de implementação — ainda não está no `package.json`).
 - Testes que validam output de log precisam do transporte de teste do pino
   (`pino.prettyFalse`/destino em memória).
 

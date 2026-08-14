@@ -28,10 +28,12 @@ Accepted` com o id do job e a URL de consulta de status.
 2. **Job `emit-fatura`**: adquire um **lease** sobre a fatura (key de coordenação
    `fatura:{id}:emitir` + `emitindo-since`, ADR-0003) e marca a fatura como `emitindo` no
    Atacado (via outbox). Carrega a fatura com sua árvore (cobranças + notas). Constrói um
-   **Flow BullMQ** (parent/child): o job `emit-fatura` é o parent; para cada cobrança em
-   `a-emitir`, um job filho `emit-cobranca` (passo 3). O callback do parent dispara quando
-   todos os filhos resolvem (sucesso ou falha exausta) e deriva o estado final da fatura:
-   `emitida` (tudo ok), `parcial` (algum erro) ou `erro` (tudo falhou).
+   **Flow BullMQ em árvore** (parent/child): `emit-fatura` é o parent; para cada cobrança
+   em `a-emitir`, um job filho `emit-cobranca` (passo 3); cada `emit-nfcom` (passo 4) é
+   **child do seu `emit-cobranca`** — a árvore é `emit-fatura → emit-cobranca →
+   emit-nfcom`. O callback do parent dispara quando **toda a árvore** resolve (sucesso ou
+   falha exausta, no nível mais profundo) e deriva o estado final da fatura: `emitida`
+   (tudo ok), `parcial` (algum erro) ou `erro` (tudo falhou).
 3. **Job `emit-cobranca`**: idempotente (ADR-0003). Toda escrita externa e toda
    persistência de estado no Atacado saem pela porta do módulo `asaas` / `atacado`
    (ADR-0004) e passam pelo outbox (ADR-0003).
@@ -62,7 +64,11 @@ Accepted` com o id do job e a URL de consulta de status.
    e as **URLs de PDF e XML** retornadas pelo gateway (armazenamento é no gateway; o
    app não baixa os arquivos); `f_situacao=autorizada`, `f_status_interno=emitida`.
    `cancelada`/`rejeitada` → `f_status_interno=erro` (fatal) + erro em `t_nfcom_erros`.
-   `processando` → retry (backoff), `f_status_interno` permanece `a-emitir`.
+   `processando` → retry (backoff), `f_status_interno` permanece `a-emitir`. **Erro local**
+   (timeout/rede/401 exausto, sem situação reportada pelo gateway) → `f_status_interno=erro`
+   + erro em `t_nfcom_erros`, `f_situacao` **inalterado** (não espelha situação inexistente).
+   `f_status_interno=cancelada` é **reservado** à SPEC-0003 (cancelamento) — este ciclo só
+   produz `a-emitir`/`emitida`/`erro`.
    Persistência via outbox.
 5. **Estado final da fatura**: o callback do parent do **Flow BullMQ** dispara quando
    todos os jobs `emit-cobranca`/`emit-nfcom` resolvem (sucesso ou falha exausta) e a
@@ -144,7 +150,7 @@ exaurir tentativas (o cliente reconsulta via `GET`). A URL alvo é a env `WEBHOO
 
 Status possíveis da fatura (`f_status`, conforme enum do CRM): `a-emitir`,
 `emitindo`, `emitida`, `parcial`, `erro` (os estados `pago`/`cancelada` de fatura são
-fora deste ciclo — SPEC futura de cancelamento; a transição `a-emitir →
+fora deste ciclo — SPEC-0003, reservada no BACKLOG; a transição `a-emitir →
 emitindo` é da SPEC-0001; o estado inicial `a-emitir` vem da preparação, SPEC-0002).
 Status possíveis da NFCom — **dois campos**:
 - `f_status_interno` (máquina interna, conforme enum do CRM): `a-emitir`, `emitida`,
@@ -156,7 +162,9 @@ Status possíveis da NFCom — **dois campos**:
 Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 `f_status_interno=emitida`; `rejeitada`/`cancelada` ↔ `f_situacao` correspondente +
 `f_status_interno=erro` (fatal); `processando` ↔ `f_situacao=processando` +
-`f_status_interno=a-emitir` (aguardando retry).
+`f_status_interno=a-emitir` (aguardando retry); **erro local** (sem situação do gateway)
+↔ `f_status_interno=erro`, `f_situacao` inalterado. `f_status_interno=cancelada` do enum
+é reservado à SPEC-0003 (cancelamento/substituição) — fora deste ciclo.
 
 ## Casos de borda
 
@@ -179,13 +187,14 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 | 15  | o processo cai após `POST /api/emitir` no gateway, antes de resolver a idempotency key da nota | no retry, **consultar o gateway pela referência própria** (`nfcom:{id}`) antes de re-emitir; se a consulta encontra a nota, resolve a key com o retorno — sem nota duplicada |
 | 16  | o customer já existe no Asaas com dados divergentes do CRM                               | **atualizar** o customer (nome/email/endereço) com os dados atuais do CRM — Atacado é fonte de domínio (ADR-0003); nunca usar dados desatualizados |
 | 17  | o BullMQ exaure as tentativas de um job de emissão (padrão: 5)                           | o item vai para `erro` via outbox, o job fica `failed` no BullMQ (Board) para inspeção/reprocesso; a consolidação da fatura prossegue (sem DLQ dedicada) |
+| 18  | o boleto de uma cobrança falha de forma fatal (ex.: customer inválido no Asaas)          | as notas da cobrança **ainda são emitidas** — a NFCom é obrigação fiscal do serviço, independente do pagamento; a cobrança vai a `erro` e a fatura tende a `parcial` |
 
 ## Questões em aberto
 
 - [ ] Cancelamento/substituição de NFCom (até 120h) é um fluxo separado, **fora deste
-      primeiro ciclo** (só emissão). Será modelado em SPEC futura (id a reservar),
-      condicionado a confirmar que o gateway `api.nfcom.com.br` expõe o endpoint de
-      evento.
+      primeiro ciclo** (só emissão). Será modelado em **SPEC-0003** (reservada no
+      BACKLOG), condicionado a confirmar que o gateway `api.nfcom.com.br` expõe o endpoint
+      de evento.
 
 ## Decisões fechadas nesta spec
 
@@ -205,9 +214,12 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
   Atacado converte o número em unidade real do CRM → `number` de centavos ao entrar no
   domínio.
 - **Escopo do primeiro ciclo**: somente emissão (sem cancelamento/substituição).
-- **Consolidação via BullMQ Flows**: `emit-fatura` é parent de um Flow; o callback do
-  parent consolida o estado final (`emitida`/`parcial`/`erro`) quando todos os filhos
-  resolvem (sucesso ou falha exausta) — sem contador próprio no SQLite.
+- **Consolidação via BullMQ Flows**: `emit-fatura` é parent de um Flow **em árvore**
+  (`emit-fatura → emit-cobranca → emit-nfcom`); o callback do parent consolida o estado
+  final (`emitida`/`parcial`/`erro`) quando **toda a árvore** resolve — boletos **e**
+  notas, sucesso ou falha exausta (o BullMQ só completa um parent quando os children
+  transitivos resolvem) — sem contador próprio no SQLite e sem consolidação prematura
+  antes de as notas terminarem.
 - **Dedup de nota no gateway por referência própria**: todo `POST /api/emitir` leva
   `externalReference = nfcom:{id}`; no retry pós-crash, o job consulta o gateway pela
   referência antes de re-emitir (caso 15) — o mesmo padrão da correlação do boleto,
@@ -222,6 +234,13 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 - **Política de retry**: padrão 5 tentativas com backoff exponencial; exauridas, o item
   vai para `erro` via outbox e o job fica `failed` no BullMQ para inspeção/reprocesso —
   sem DLQ dedicada (caso 17).
+- **Nota com boleto falho**: a emissão das notas independe do sucesso do boleto da
+  cobrança (caso 18) — a NFCom é obrigação fiscal do serviço; a cobrança vai a `erro`,
+  as notas seguem e a fatura tende a `parcial`.
+- **Erro local da nota**: erro sem situação reportada pelo gateway (timeout/rede/401
+  exausto) → `f_status_interno=erro` + `t_nfcom_erros`, `f_situacao` inalterado;
+  `f_status_interno=cancelada` é **reservado** à SPEC-0003 (cancelamento), não produzido
+  neste ciclo.
 - **Fuso horário do domínio**: `America/Sao_Paulo` explícito (decisão canônica em
   CONVENTIONS.md) para `dataReferencia`/`dataVencimento` e janelas de faturamento.
 
@@ -230,15 +249,15 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 ```bash
 bun run typecheck                 # exit 0
 # cada caso de borda tem teste nomeado que o exercita:
-bun run test test/emission        # casos 1-11, 15-17 (emissão) — N/N verdes
+bun run test test/emission        # casos 1-11, 15-18 (emissão) — N/N verdes
 bun run test test/webhook         # casos 12,13,14 (webhook) — N/N verdes
 # job de emissão enfileira (não executa síncrono) — ADR-0002
 test -d src/http && (grep -rn "queue.add\|\.add(" src/http/ | grep -i emit | wc -l | grep -qv '^0$' || exit 1)
 # nenhum boleto/nota é emitido sem consulta à idempotency key — ADR-0003
 # (caso 5: test/emission/idempotency-boleto.test.ts; caso 2: test/emission/orphan-lease.test.ts)
-test -d src/emission && (grep -rn "payments\|api/emitir" src/emission/ | grep -v "idempotency" && exit 1 || true)
+test -d src/domain/emissao && (grep -rn "payments\|api/emitir" src/domain/emissao/ | grep -v "idempotency" && exit 1 || true)
 # re-emitir nota sem antes consultar a referência é proibido — ADR-0003 item 4 (caso 15)
-test -d src/emission && (grep -rn "api/emitir" src/emission/ | grep -v "consultar-referencia\|externalReference" && exit 1 || true)
+test -d src/domain/emissao && (grep -rn "api/emitir" src/domain/emissao/ | grep -v "consultar-referencia\|externalReference" && exit 1 || true)
 ```
 
 Casos de borda exercitados (cada um com teste referenciado): 1, 3, 4 (validação
@@ -247,7 +266,8 @@ boleto: `test/emission/idempotency-boleto.test.ts`); 6, 7 (retry/fatal NFCom); 8
 (documento inválido); 10 (rollback), 11 (parcial vs erro); 9 (reauth:
 `test/emission/nfcom-reauth.test.ts`); 12, 13, 14 (entrega de webhook); 15 (dedup por
 referência: `test/emission/idempotency-nota.test.ts`); 16 (customer divergente:
-`test/emission/asaas-customer.test.ts`); 17 (retry exausto: `test/emission/retry-exausto.test.ts`).
+`test/emission/asaas-customer.test.ts`); 17 (retry exausto: `test/emission/retry-exausto.test.ts`);
+18 (nota com boleto falho: `test/emission/cobranca-boleto-falho.test.ts`).
 Os caminhos de teste são a convenção alvo; ausência do `src/` antes da implementação
 não invalida o `status: draft`.
 

@@ -62,7 +62,7 @@ dê persistência + retry + rate-limit com a mesma maturidade para TS.
 ### HTTP client
 
 **`fetch` nativo do Bun** (escolhido) — já embutido, sem dependência de cliente HTTP. Um
-wrapper leve em `src/shared/http` dá timeout (`AbortController`), retry e classificação de
+wrapper leve em `src/lib/http` dá timeout (`AbortController`), retry e classificação de
 erro, padronizando num único estilo o acesso HTTP do app.
 
 **Decisão: fetch nativo + wrapper próprio** (sem axios).
@@ -89,7 +89,7 @@ schemas de env (`@t3-oss/env-core`) e contratos de domínio.
 | Framework HTTP | **Hono**                                        |
 | ORM            | **Drizzle ORM** sobre `bun:sqlite`              |
 | Filas          | **BullMQ** + **Redis** (`ioredis`)              |
-| HTTP client    | **fetch** nativo + wrapper em `src/shared/http` |
+| HTTP client    | **fetch** nativo + wrapper em `src/lib/http` |
 | Logging        | **pino** (com redação)                          |
 | Validação      | **Zod 4**                                       |
 | Testes         | **`bun test`** (nativo do runtime)              |
@@ -120,7 +120,7 @@ schemas de env (`@t3-oss/env-core`) e contratos de domínio.
 # Sem axios; HTTP só via wrapper de fetch.
 test -d src && (grep -rn "from \"axios\"\|from 'axios'" src/ package.json && exit 1 || true)
 # SQLite acessado só via Drizzle.
-grep -rln "drizzle-orm" src/db/ | wc -l | grep -qv '^0$' || exit 1
+grep -rln "drizzle-orm" src/lib/db/ | wc -l | grep -qv '^0$' || exit 1
 # Hono como framework HTTP.
 grep -rn "from \"hono\"" src/http/ | wc -l | grep -qv '^0$' || exit 1
 ```

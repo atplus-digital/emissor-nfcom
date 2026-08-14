@@ -13,3 +13,4 @@ número liberado à mão nunca é reutilizado (renumerar cascateia, STANDARD §5
 
 | NNNN | título | data | situação |
 | --- | --- | --- | --- |
+| 0003 | Cancelamento de NFCom e descarte de fatura | 2026-08-14 | reservada |

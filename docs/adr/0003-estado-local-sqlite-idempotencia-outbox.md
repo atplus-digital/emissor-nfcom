@@ -148,9 +148,9 @@ Concretamente:
 
 ```bash
 # Existe schema/migration de idempotency_keys, outbox e lease de fatura.
-grep -rln "idempotency_keys\|outbox\|emitindo-since" src/db/ | wc -l | grep -qv '^0$' || exit 1
+grep -rln "idempotency_keys\|outbox\|emitindo-since" src/lib/db/ | wc -l | grep -qv '^0$' || exit 1
 # Nenhum job de emissão chama Asaas/SEFAZ sem o helper de idempotência.
-test -d src/emission && (grep -rn "POST\|payments\|api/emitir" src/emission/ | grep -v "idempotency" && exit 1 || true)
+test -d src/domain/emissao && (grep -rn "POST\|payments\|api/emitir" src/domain/emissao/ | grep -v "idempotency" && exit 1 || true)
 ```
 
 ## Notas

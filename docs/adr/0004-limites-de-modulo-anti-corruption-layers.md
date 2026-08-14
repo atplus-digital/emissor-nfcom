@@ -47,7 +47,7 @@ Três módulos — `modules/atacado`, `modules/asaas`, `modules/nfcom` — cada 
 - **tradutor** (mapper bidirecional: tipos externos ↔ tipos de domínio próprios);
 - **porta de domínio** (interface que o resto do app consome, em termos de domínio).
 
-O domínio (`emission/`, `queue/`, `db/`) só conhece as portas, nunca os tipos externos.
+O domínio (`domain/`, `workers/`, `lib/db/`) só conhece as portas, nunca os tipos externos.
 
 **Prós:**
 
@@ -124,6 +124,15 @@ o valor já desmascarado; documento mascarado vindo do Atacado é desmascarado p
 Implementação em `modules/atacado/translators/` (ou helper de domínio compartilhado se
 reusado fora do módulo); nunca inline nas rotas.
 
+**Enums de status (fatura/cobrança/nota) são slugs no CRM**: os campos `f_status`
+(fatura e cobrança) e `f_status_interno` (nota) do Atacado armazenam **slugs**
+(`a-emitir`, `emitida`, `parcial`, `erro`, `pago`, `cancelada`...) — as labels humanas
+("A Emitir", "Fatura e NF Emitida") são **apenas exibição** no NocoBase, não o valor
+persistido. O domínio e o CRM falam a mesma língua (slug); o tradutor **não converte
+status** — qualquer label vista num dump do CRM é apresentação, não dado de domínio.
+Atenção ao validar os tipos gerados (ADR-0006): o `z.enum` carrega os **valores**
+(slugs); as labels aparecem só na mensagem de erro / mapa de labels.
+
 ## Consequências
 
 **Positivas:**
@@ -140,8 +149,8 @@ reusado fora do módulo); nunca inline nas rotas.
 **Obrigatório a partir de agora:**
 
 - `src/domain/` não importa nada de `src/modules/*` (dependência unidirecional).
-- Tipos externos (do Atacado/Asaas/NFCom) não aparecem em `src/emission`, `src/queue`,
-  `src/db`, nem `src/http` — só tipos de domínio.
+- Tipos externos (do Atacado/Asaas/NFCom) não aparecem em `src/domain`, `src/workers`,
+  `src/lib/db`, nem `src/http` — só tipos de domínio.
 - Valores monetários do domínio são sempre **centavos inteiros** (`number`); número em
   unidade real só existe no módulo Atacado, convertido na fronteira
   (número↔centavos, arredondamento determinístico).

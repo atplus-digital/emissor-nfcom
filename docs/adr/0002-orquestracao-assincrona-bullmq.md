@@ -116,19 +116,26 @@ não teria quem a drenasse.
 conservadores (`RATE_LIMIT_ASAAS`, `RATE_LIMIT_NFCOM`, `RATE_LIMIT_ATACADO` em req/s),
 validadas por Zod (`@t3-oss/env-core`, ADR-0005). Defaults ajustados em produção conforme
 observação de 429s. Cada fila BullMQ usa o rate-limiter nativo com o valor da env
-correspondente.
+correspondente. O rate-limiter do BullMQ é **por fila**, não por gateway global: a fila
+`asaas` agrupa jobs cujas escritas externas são no Asaas, a `nfcom` no gateway NFCom e a
+`atacado`/`outbox-relay` no Atacado. Cada job de emissão escreve primariamente num único
+provedor (as escritas no Atacado saem pelo outbox-relay), então o rate-limit da fila
+aproxima o limite do provedor; se um provedor vier a ser tocado de duas filas, o limite
+agregado é a soma das filas — observar em produção (429s).
 
 **Workers e single-instance**: por ora, workers BullMQ rodam no mesmo processo
 single-instance do SQLite (ADR-0003). SQLite não é compartilhado entre pods; escalar a
 múltiplas instâncias exige migrar o store de coordenação (Postgres) — ADR futuro.
 
-**Fan-out via Flows (parent/child)**: `emit-fatura` é o **parent** de um Flow BullMQ
-cujos children são os jobs `emit-cobranca` (que por sua vez enfileiram `emit-nfcom`).
-O callback do parent dispara quando todos os filhos resolvem (sucesso ou falha
-exausta) e consolida o estado final da fatura (`emitida`/`parcial`/`erro`, SPEC-0001)
-— sem contador de conclusão próprio no SQLite. Primitiva nativa do BullMQ; a
-alternativa rejeitada (contador transacional local) duplicaria estado que o Redis já
-tem e seria suscetível a contagem presa.
+**Fan-out via Flows (parent/child, em árvore)**: `emit-fatura` é o **parent** de um
+Flow BullMQ; os children são os jobs `emit-cobranca`, e cada `emit-nfcom` é **child do
+seu `emit-cobranca`** — a árvore é `emit-fatura → emit-cobranca → emit-nfcom` (não um
+fan-out plano). O callback do parent dispara quando **toda a árvore** resolve (o BullMQ
+só completa um parent quando os children transitivos resolvem), consolidando o estado
+final da fatura (`emitida`/`parcial`/`erro`, SPEC-0001) — sem contador de conclusão
+próprio no SQLite e **sem consolidação prematura** antes de as notas terminarem.
+Primitiva nativa do BullMQ; a alternativa rejeitada (contador transacional local)
+duplicaria estado que o Redis já tem e seria suscetível a contagem presa.
 
 **Política de retry e item falho**: jobs de emissão usam padrão de **5 tentativas**
 com backoff exponencial. Exauridas, o item vai para `erro` no Atacado via outbox e o
@@ -168,11 +175,11 @@ job em andamento com **timeout de 30s** antes de sair.
 # Nenhuma rota executa emissão síncrona; ela apenas enfileira o job.
 test -d src/http && (grep -rn "queue.add\|\.add(" src/http/ | grep -i emit | wc -l | grep -qv '^0$' || exit 1)
 # Filas e workers existem; inclui a fila outbox e rate-limit por gateway.
-test -d src/queue && (grep -rn "new Queue\|new Worker" src/queue/ | wc -l | grep -qv '^0$' || exit 1)
+test -d src/workers && (grep -rn "new Queue\|new Worker" src/workers/ | wc -l | grep -qv '^0$' || exit 1)
 # Rate-limit por gateway declarado no schema de env (RATE_LIMIT_ASAAS/NFCOM/ATACADO).
-grep -rn "RATE_LIMIT_ASAAS\|RATE_LIMIT_NFCOM\|RATE_LIMIT_ATACADO" src/env.ts src/env/ 2>/dev/null | wc -l | grep -qv '^0$' || exit 1
+grep -rn "RATE_LIMIT_ASAAS\|RATE_LIMIT_NFCOM\|RATE_LIMIT_ATACADO" src/env.ts | wc -l | grep -qv '^0$' || exit 1
 # Fila outbox existe (drena o outbox do ADR-0003).
-grep -rn "outbox" src/queue/ | wc -l | grep -qv '^0$' || exit 1
+grep -rn "outbox" src/workers/ | wc -l | grep -qv '^0$' || exit 1
 ```
 
 ## Notas

@@ -11,8 +11,8 @@ deciders: [gugacarbo]
 ## Contexto e problema
 
 ADR-0004 define os limites de módulo (uma ACL por integração: `atacado`, `asaas`,
-`nfcom`) e cita pastas de domínio (`src/domain`, `src/emission`, `src/queue`,
-`src/db`) sem fixar o layout completo. Antes do primeiro commit de código de
+`nfcom`) e cita pastas de domínio (`src/domain`, `src/workers`, `src/lib/db`)
+sem fixar o layout completo. Antes do primeiro commit de código de
 implementação, falta decidir **onde vive cada tipo de arquivo em `src/`** — rotas
 HTTP, workers BullMQ, composição de dependências, infraestrutura compartilhada —
 e a organização de `test/`, citada pelas DoDs das SPECs (`test/<dir>/`).
@@ -89,7 +89,10 @@ src/
 
 - **`test/` espelha `src/`**: `test/http/`, `test/workers/`, `test/modules/
   <acl>/`, `test/domain/<agregado>/`. Um arquivo de teste por unidade em `src/`
-  (`emissao.worker.ts` → `test/workers/emissao.worker.test.ts`).
+  (`emissao.worker.ts` → `test/workers/emissao.worker.test.ts`). **Casos de borda de
+  fluxo** (os enumerados nas SPECs, que atravessam camadas) ficam em `test/<fluxo>/`
+  (`test/emission/`, `test/preparation/`, `test/webhook/` — alvo das DoDs das SPECs),
+  mapeando o fluxo de domínio em vez do agregado.
 - **Naming**: rotas `*.route.ts`, workers `*.worker.ts`, portas `*.port.ts`,
   repositórios `*.repository.ts`, translators em `modules/<acl>/translators/`.
 
@@ -125,9 +128,9 @@ grep -c "worker" src/index.ts
 
 ## Notas
 
-- O `src/db/client.ts` do scaffold inicial será movido para `src/lib/db/`
-  no primeiro commit de implementação; `src/generated/` permanece onde está
-  (ADR-0006).
+- O `src/db/client.ts` do scaffold inicial foi removido (relocado para
+  `src/lib/db/`, commit `29db738`); o schema/migrations de coordenação vivem em
+  `src/lib/db/` (ADR-0003). `src/generated/` permanece onde está (ADR-0006).
 - Diagrama de dependência aceito: `index.ts → {http, workers, modules, lib,
   domain}`, `http/workers → {domain, lib}`, `modules → {domain/ports, lib}`,
   `domain → ∅` (só tipos stdlib/Zod).

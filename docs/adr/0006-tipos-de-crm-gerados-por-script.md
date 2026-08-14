@@ -128,7 +128,7 @@ app nunca os importa.
 - Toda mudança na forma dos tipos gerados acontece no gerador
   (`scripts/nocobase/src/pipelines/generate-types/`), nunca no output.
 - Tipos gerados são consumidos apenas dentro de `modules/<integração>/translators/`
-  (ADR-0004); nunca importados por `src/domain`, `src/emission`, `src/http` etc.
+  (ADR-0004); nunca importados por `src/domain`, `src/workers`, `src/http` etc.
 
 ## Confirmação
 

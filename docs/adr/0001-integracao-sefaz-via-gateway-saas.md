@@ -132,5 +132,5 @@ grep -rn "api/emitir\|api/autenticar\|nfcom.com.br" src/ | grep -v "src/modules/
 - Avaliação de provedor alternativo (Opção 3) pode virar ADR futuro se custo/disponibilidade
   do `nfcom.com.br` se tornarem problema. A ACL (ADR-0004) isola essa troca.
 - Cancelamento/substituição de NFCom (até 120h após o último dia do mês de autorização)
-  depende de o provedor expor o endpoint — a confirmar em SPEC futura (id a reservar),
-  fora do primeiro ciclo (somente emissão, SPEC-0001).
+  depende de o provedor expor o endpoint — a confirmar em **SPEC-0003** (reservada no
+  BACKLOG), fora do primeiro ciclo (somente emissão, SPEC-0001).
