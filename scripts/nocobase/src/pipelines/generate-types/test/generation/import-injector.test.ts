@@ -5,7 +5,7 @@ import {
 	mergeImportBySource,
 	withMainFileImports,
 } from "@generators/pipelines/generate-types/content/import-injector";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 function createEmptyCollectionTypesMap(
 	collectionNames: string[],

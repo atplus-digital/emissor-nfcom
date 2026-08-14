@@ -108,23 +108,23 @@ export function removeDir(dir: string): void {
 	}
 }
 
-function isVitestCoverageTempPath(dir: string): boolean {
+function isCoverageTempPath(dir: string): boolean {
 	const parts = path.resolve(dir).split(path.sep);
 	const tmpIndex = parts.lastIndexOf(".tmp");
 	if (tmpIndex <= 0) {
 		return false;
 	}
 	const parent = parts[tmpIndex - 1];
-	return parent === "coverage" || parent === ".vitest-coverage";
+	return parent === "coverage";
 }
 
 export function cleanupTempSessionDir(tempDir: string): void {
-	if (isVitestCoverageTempPath(tempDir)) {
+	if (isCoverageTempPath(tempDir)) {
 		return;
 	}
 
 	const tempRootDir = path.dirname(tempDir);
-	// Never touch Vitest coverage folders (basename ".tmp") or unrelated temp roots.
+	// Never touch coverage folders (basename ".tmp") or unrelated temp roots.
 	if (path.basename(tempRootDir) === ".tmp") {
 		return;
 	}

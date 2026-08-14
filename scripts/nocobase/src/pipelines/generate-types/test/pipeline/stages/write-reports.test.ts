@@ -1,5 +1,5 @@
 import { writeReportsStage } from "@generators/pipelines/generate-types/stages/write-reports";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createMockGeneratedTypes } from "../../factories";
 import { createMockTask, createPipelineContext } from "../../helpers";
 

@@ -1,5 +1,5 @@
 import { buildTypes } from "@generators/pipelines/generate-types/stages/build-types";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import {
 	createMockCollectionTypesMap,
 	createMockGeneratedTypes,

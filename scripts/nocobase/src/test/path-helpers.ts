@@ -1,3 +1,3 @@
-export function isPnpmCommand(command: string): boolean {
-	return command === "pnpm" || command === "pnpm.cmd";
+export function isBunxCommand(command: string): boolean {
+	return command === "bunx" || command === "bun.exe";
 }

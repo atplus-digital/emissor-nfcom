@@ -1,8 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	mock,
+} from "bun:test";
 
 // Mock node:fs before importing lifecycle
-vi.mock("node:fs", () => ({
-	...vi.importActual("node:fs"),
+mock.module("node:fs", () => ({
+	...import.meta.require("node:fs"),
 	mkdirSync: vi.fn(),
 	existsSync: vi.fn(() => true),
 	writeFileSync: vi.fn(),
@@ -13,11 +21,11 @@ vi.mock("node:fs", () => ({
 }));
 
 // Mock the @generators path aliases
-vi.mock("@generators/lib/io/locker", () => ({
+mock.module("@generators/lib/io/locker", () => ({
 	applyWorkspaceLockIfNeeded: vi.fn(),
 }));
 
-vi.mock("@generators/lib/pipeline/reports", () => ({
+mock.module("@generators/lib/pipeline/reports", () => ({
 	createReportsContext: vi.fn(() => ({
 		schemaVersion: 1,
 		namespaces: {},
@@ -26,11 +34,11 @@ vi.mock("@generators/lib/pipeline/reports", () => ({
 	renderReportsMarkdown: vi.fn(() => "# Report\n"),
 }));
 
-vi.mock("@generators/lib/pipeline/runner", () => ({
+mock.module("@generators/lib/pipeline/runner", () => ({
 	runPipelineStages: vi.fn(),
 }));
 
-vi.mock("./lifecycle-tasks", () => ({
+mock.module("./lifecycle-tasks", () => ({
 	backupCurrentOutput: vi.fn(),
 	diffTempVsOutput: vi.fn(),
 	handleNoChanges: vi.fn(),
@@ -60,19 +68,19 @@ describe("lifecycle", () => {
 		vi.clearAllMocks();
 
 		// Default mock implementations
-		vi.mocked(applyWorkspaceLockIfNeeded).mockImplementation(() => {});
-		vi.mocked(createReportsContext).mockReturnValue({
+		applyWorkspaceLockIfNeeded.mockImplementation(() => {});
+		createReportsContext.mockReturnValue({
 			schemaVersion: 1,
 			namespaces: {},
 		});
-		vi.mocked(runPipelineStages).mockReturnValue(undefined);
-		vi.mocked(validateGeneratedOutput).mockResolvedValue(undefined);
-		vi.mocked(diffTempVsOutput).mockResolvedValue(undefined);
-		vi.mocked(handleNoChanges).mockResolvedValue(undefined);
-		vi.mocked(backupCurrentOutput).mockResolvedValue(undefined);
-		vi.mocked(swapTempToOutputDirs).mockResolvedValue(undefined);
-		vi.mocked(renderReportsSummary).mockResolvedValue(undefined);
-		vi.mocked(fs.mkdirSync).mockImplementation(() => {});
+		runPipelineStages.mockReturnValue(undefined);
+		validateGeneratedOutput.mockResolvedValue(undefined);
+		diffTempVsOutput.mockResolvedValue(undefined);
+		handleNoChanges.mockResolvedValue(undefined);
+		backupCurrentOutput.mockResolvedValue(undefined);
+		swapTempToOutputDirs.mockResolvedValue(undefined);
+		renderReportsSummary.mockResolvedValue(undefined);
+		fs.mkdirSync.mockImplementation(() => {});
 	});
 
 	afterEach(() => {
@@ -116,7 +124,7 @@ describe("lifecycle", () => {
 			newListr: vi.fn().mockReturnValue({}),
 		};
 
-		vi.mocked(diffTempVsOutput).mockImplementation(async (ctx) => {
+		diffTempVsOutput.mockImplementation(async (ctx) => {
 			ctx.hasChanges = false;
 			ctx.diffs = [];
 		});
@@ -156,7 +164,7 @@ describe("lifecycle", () => {
 			newListr: vi.fn().mockReturnValue({}),
 		};
 
-		vi.mocked(diffTempVsOutput).mockImplementation(async (ctx) => {
+		diffTempVsOutput.mockImplementation(async (ctx) => {
 			ctx.hasChanges = true;
 			ctx.diffs = [
 				{ changedFiles: ["a.ts"], unchangedFiles: [], deletedFiles: [] },
@@ -201,7 +209,7 @@ describe("lifecycle", () => {
 			newListr: vi.fn().mockReturnValue({}),
 		};
 
-		vi.mocked(diffTempVsOutput).mockImplementation(async (ctx) => {
+		diffTempVsOutput.mockImplementation(async (ctx) => {
 			ctx.hasChanges = false;
 			ctx.diffs = [];
 		});
@@ -407,7 +415,7 @@ describe("lifecycle", () => {
 			newListr: vi.fn().mockReturnValue({}),
 		};
 
-		vi.mocked(diffTempVsOutput).mockImplementation(async (ctx) => {
+		diffTempVsOutput.mockImplementation(async (ctx) => {
 			ctx.hasChanges = false;
 			ctx.diffs = [];
 		});
@@ -452,7 +460,7 @@ describe("lifecycle", () => {
 			newListr: vi.fn().mockReturnValue({}),
 		};
 
-		vi.mocked(diffTempVsOutput).mockImplementation(async (ctx) => {
+		diffTempVsOutput.mockImplementation(async (ctx) => {
 			ctx.hasChanges = true;
 			ctx.diffs = [
 				{ changedFiles: ["a.ts"], unchangedFiles: [], deletedFiles: [] },

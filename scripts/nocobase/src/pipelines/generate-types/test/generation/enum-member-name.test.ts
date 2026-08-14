@@ -1,6 +1,6 @@
 import type { EnumOption } from "@generators/pipelines/generate-types/@types/generation";
 import { generateCollectionEnumTypes } from "@generators/pipelines/generate-types/content/enums";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 function typesWithEnum(fieldName: string, enumOptions: EnumOption[]) {
 	return {

@@ -1,12 +1,10 @@
 import path from "node:path";
 import type { OrchestrationTaskRunner } from "@shared/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, mock } from "bun:test";
 
-const writeFilesStageMock = vi.hoisted(() =>
-	vi.fn(async (ctx: unknown) => ctx),
-);
+const writeFilesStageMock = vi.fn(async (ctx: unknown) => ctx);
 
-vi.mock("@shared/utils/env", () => ({
+mock.module("@shared/utils/env", () => ({
 	resolveNocoBaseEnv: vi.fn(() => ({
 		baseUrl: "https://nocobase.test/api",
 		token: "token",
@@ -14,7 +12,7 @@ vi.mock("@shared/utils/env", () => ({
 	})),
 }));
 
-vi.mock("@generators/lib/lifecycle/lifecycle", () => ({
+mock.module("@generators/lib/lifecycle/lifecycle", () => ({
 	runStandardPipeline: vi.fn(async (options) => {
 		const makeListrRunner = (): OrchestrationTaskRunner => ({
 			newListr: vi.fn(
@@ -60,27 +58,36 @@ vi.mock("@generators/lib/lifecycle/lifecycle", () => ({
 	}),
 }));
 
-vi.mock("@generators/pipelines/generate-types/stages/write-files", () => ({
+mock.module("@generators/pipelines/generate-types/stages/write-files", () => ({
 	writeFilesStage: writeFilesStageMock,
 }));
 
-vi.mock("@generators/pipelines/generate-types/stages/fetch-schemas", () => ({
-	fetchSchemas: vi.fn(async (ctx: unknown) => ctx),
-}));
+mock.module(
+	"@generators/pipelines/generate-types/stages/fetch-schemas",
+	() => ({
+		fetchSchemas: vi.fn(async (ctx: unknown) => ctx),
+	}),
+);
 
-vi.mock("@generators/pipelines/generate-types/stages/build-types", () => ({
+mock.module("@generators/pipelines/generate-types/stages/build-types", () => ({
 	buildTypes: vi.fn(async (ctx: unknown) => ctx),
 }));
 
-vi.mock("@generators/pipelines/generate-types/stages/generate-content", () => ({
-	generateContentStage: vi.fn(async (ctx: unknown) => ctx),
-}));
+mock.module(
+	"@generators/pipelines/generate-types/stages/generate-content",
+	() => ({
+		generateContentStage: vi.fn(async (ctx: unknown) => ctx),
+	}),
+);
 
-vi.mock("@generators/pipelines/generate-types/stages/write-reports", () => ({
-	writeReportsStage: vi.fn(async (ctx: unknown) => ctx),
-}));
+mock.module(
+	"@generators/pipelines/generate-types/stages/write-reports",
+	() => ({
+		writeReportsStage: vi.fn(async (ctx: unknown) => ctx),
+	}),
+);
 
-vi.mock("../../../../config/datasources", () => ({
+mock.module("../../../../config/datasources", () => ({
 	dataSourceConfigs: [
 		{
 			name: "mock-nocobase",
@@ -92,7 +99,7 @@ vi.mock("../../../../config/datasources", () => ({
 	],
 }));
 
-vi.mock("@shared/http/nocobase-client", () => ({
+mock.module("@shared/http/nocobase-client", () => ({
 	NocoBaseApiClient: class MockNocoBaseApiClient {
 		public baseUrl = "https://nocobase.test/api";
 		public async fetchCollections(dataSourceKey: string) {

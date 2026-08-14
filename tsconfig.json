@@ -29,6 +29,7 @@
 
 		// Path aliases do gerador de types (scripts/nocobase)
 		"paths": {
+			"#/*": ["./src/*"],
 			"@generators/*": ["./scripts/nocobase/src/*"],
 			"@shared/types": ["./scripts/nocobase/types.ts"],
 			"@shared/*": ["./scripts/nocobase/src/*"]
@@ -36,7 +37,7 @@
 	},
 	"exclude": [
 		"node_modules",
-		// Testes rodam via vitest (transpilação), não são typecheckados
+		// Testes rodam via bun test (transpilação), não são typecheckados
 		"**/*.test.ts",
 		"**/*.spec.ts"
 	]

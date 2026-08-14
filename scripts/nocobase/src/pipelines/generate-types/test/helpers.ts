@@ -3,7 +3,7 @@ import type { PipelineReportsContext } from "@generators/lib/pipeline/reports";
 import type { DataSourceGenerationConfig } from "@generators/pipelines/generate-types/@types/script";
 import type { GenerateTypesPipelineCtx } from "@generators/pipelines/generate-types/stages/fetch-schemas";
 import type { TaskRunner } from "@shared/types";
-import { vi } from "vitest";
+import { vi } from "bun:test";
 
 export function createMockTask(): TaskRunner {
 	return { output: "" } as TaskRunner;
@@ -40,7 +40,7 @@ export function createPipelineContext(
 > {
 	const runtimeConfig = createMockDataSourceConfig(overrides.runtimeConfig);
 	return {
-		tempDir: "/tmp/vitest-generate-types",
+		tempDir: "/tmp/nocobase-generate-types",
 		outputDirs: [runtimeConfig.outputDir ?? "/tmp/out"],
 		runtimeConfig,
 		reports: createMockReports(),

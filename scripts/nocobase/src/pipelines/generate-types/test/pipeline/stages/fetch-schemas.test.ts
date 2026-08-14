@@ -1,6 +1,6 @@
 import type { GenerateTypesPipelineCtx } from "@generators/pipelines/generate-types/stages/fetch-schemas";
 import { fetchSchemas } from "@generators/pipelines/generate-types/stages/fetch-schemas";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import { createMockField } from "../../factories";
 import {
 	createMockDataSourceConfig,

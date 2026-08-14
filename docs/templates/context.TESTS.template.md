@@ -13,7 +13,7 @@
 <!-- O(s) comando(s) que rodam a suíte. É o que o docs-check exige existir. -->
 
 ```bash
-npm test                 # substitua pelo comando real do repo (pytest -q, deno test, …)
+bun test                 # substitua pelo comando real do repo (pytest -q, deno test, …)
 ```
 
 ## Tipos de teste usados neste repo

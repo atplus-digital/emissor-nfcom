@@ -1,10 +1,20 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	mock,
+} from "bun:test";
+
+const originalProcess = process;
 
 // Mock the external dependencies that lifecycle-tasks imports from @generators paths
 // IMPORTANT: These vi.mock calls MUST be at the top level, before any imports
-vi.mock("@generators/lib/io/atomic-writer", () => ({
+mock.module("@generators/lib/io/atomic-writer", () => ({
 	backupDir: vi.fn(),
 	cleanupTempSessionDir: vi.fn(),
 	computeDiff: vi.fn(),
@@ -12,15 +22,15 @@ vi.mock("@generators/lib/io/atomic-writer", () => ({
 	swapTempToOutput: vi.fn(),
 }));
 
-vi.mock("@generators/lib/validation/tsc-validator", () => ({
+mock.module("@generators/lib/validation/tsc-validator", () => ({
 	listTypeScriptFilesInDirectory: vi.fn(() => []),
 }));
 
-vi.mock("@generators/lib/validation/validation-options", () => ({
+mock.module("@generators/lib/validation/validation-options", () => ({
 	isValidationSkipped: vi.fn(() => false),
 }));
 
-vi.mock("@generators/lib/pipeline/reports", () => ({
+mock.module("@generators/lib/pipeline/reports", () => ({
 	countReports: vi.fn(() => 0),
 	renderReportsMarkdown: vi.fn(() => "# Report\n"),
 }));
@@ -64,10 +74,10 @@ describe("lifecycle-tasks", () => {
 		vi.clearAllMocks();
 
 		// Stub process.cwd() to return our workspace
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => WORKSPACE_ROOT,
-		});
+		};
 
 		// Create temp directory
 		fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
@@ -75,17 +85,17 @@ describe("lifecycle-tasks", () => {
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp"), { recursive: true });
 
 		// Default mocks
-		vi.mocked(backupDir).mockReturnValue(undefined);
-		vi.mocked(cleanupTempSessionDir).mockReturnValue(undefined);
-		vi.mocked(computeDiff).mockReturnValue({
+		backupDir.mockReturnValue(undefined);
+		cleanupTempSessionDir.mockReturnValue(undefined);
+		computeDiff.mockReturnValue({
 			changedFiles: [],
 			unchangedFiles: [],
 			deletedFiles: [],
 		});
-		vi.mocked(runValidation).mockResolvedValue(true);
-		vi.mocked(swapTempToOutput).mockReturnValue(undefined);
-		vi.mocked(countReports).mockReturnValue(0);
-		vi.mocked(renderReportsMarkdown).mockReturnValue("# Report\n");
+		runValidation.mockResolvedValue(true);
+		swapTempToOutput.mockReturnValue(undefined);
+		countReports.mockReturnValue(0);
+		renderReportsMarkdown.mockReturnValue("# Report\n");
 
 		// Setup mock task
 		mockTask = {
@@ -120,6 +130,7 @@ describe("lifecycle-tasks", () => {
 	afterEach(() => {
 		fs.rmSync("/tmp/test-lifecycle-tasks", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	// ══════════════════════════════════════════════════════════════
@@ -168,7 +179,7 @@ describe("lifecycle-tasks", () => {
 		);
 		fs.mkdirSync(tempGenerated, { recursive: true });
 		fs.writeFileSync(path.join(tempGenerated, "a.ts"), "export const a = 1;\n");
-		vi.mocked(runValidation).mockResolvedValue(false);
+		runValidation.mockResolvedValue(false);
 		const ctx: LifecycleCtx = {
 			hasChanges: true,
 			diffs: [
@@ -217,7 +228,7 @@ describe("lifecycle-tasks", () => {
 			"src/generated",
 		);
 		fs.mkdirSync(tempGenerated, { recursive: true });
-		vi.mocked(listTypeScriptFilesInDirectory).mockReturnValue([
+		listTypeScriptFilesInDirectory.mockReturnValue([
 			path.join(tempGenerated, "remaining.ts"),
 		]);
 
@@ -241,7 +252,7 @@ describe("lifecycle-tasks", () => {
 	});
 
 	it("TC-UT-LIFT-003c: should skip validation when --skip-validate is enabled", async () => {
-		vi.mocked(isValidationSkipped).mockReturnValue(true);
+		isValidationSkipped.mockReturnValue(true);
 		const ctx: LifecycleCtx = {
 			hasChanges: true,
 			diffs: [
@@ -281,7 +292,7 @@ describe("lifecycle-tasks", () => {
 			outputDirs: ["src/generated", "src/types"],
 		};
 
-		vi.mocked(computeDiff).mockReturnValue({
+		computeDiff.mockReturnValue({
 			changedFiles: [],
 			unchangedFiles: ["a.ts"],
 			deletedFiles: [],
@@ -311,7 +322,7 @@ describe("lifecycle-tasks", () => {
 		});
 
 		const ctx = { hasChanges: false, diffs: [] as unknown[] };
-		vi.mocked(computeDiff).mockReturnValue({
+		computeDiff.mockReturnValue({
 			changedFiles: ["a.ts", "b.ts"],
 			unchangedFiles: [],
 			deletedFiles: [],
@@ -341,7 +352,7 @@ describe("lifecycle-tasks", () => {
 		});
 
 		const ctx = { hasChanges: false, diffs: [] as unknown[] };
-		vi.mocked(computeDiff).mockReturnValue({
+		computeDiff.mockReturnValue({
 			changedFiles: [],
 			unchangedFiles: [],
 			deletedFiles: ["c.ts"],

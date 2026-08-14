@@ -5,27 +5,15 @@ import { formatErrorMessage } from "@generators/lib/cli/format-error";
 
 const execFileAsync = promisify(execFile);
 
-function isWindows(): boolean {
-	return process.platform === "win32";
-}
-
 async function runCommand(
 	label: string,
 	cmd: string,
 	args: string[],
 ): Promise<void> {
 	try {
-		const resolvedCmd = cmd === "pnpm" && isWindows() ? "pnpm.cmd" : cmd;
-		const options = {
+		const { stdout: _stdout, stderr } = await execFileAsync(cmd, args, {
 			maxBuffer: 10 * 1024 * 1024,
-			windowsHide: true,
-			...(isWindows() && { shell: true }),
-		};
-		const { stdout: _stdout, stderr } = await execFileAsync(
-			resolvedCmd,
-			args,
-			options,
-		);
+		});
 
 		if (stderr) writeCliError(stderr);
 	} catch (error) {
@@ -41,16 +29,14 @@ export async function runLinterFix(dirs: string[]): Promise<void> {
 	const mdGlobs = dirs.map((d) => `${d}/**/*.md`);
 
 	await Promise.all([
-		runCommand(`Biome (${dirs.length} diretório(s))`, "pnpm", [
-			"exec",
+		runCommand(`Biome (${dirs.length} diretório(s))`, "bunx", [
 			"biome",
 			"check",
 			"--write",
 			"--vcs-use-ignore-file=false",
 			...dirs,
 		]),
-		runCommand("Prettier (markdown)", "pnpm", [
-			"dlx",
+		runCommand("Prettier (markdown)", "bunx", [
 			"prettier",
 			"--write",
 			"--no-error-on-unmatched-pattern",

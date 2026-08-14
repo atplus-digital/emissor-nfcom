@@ -1,5 +1,5 @@
 import { generateIndexWithAllExportsWithPaths } from "@generators/pipelines/generate-types/content/split-index";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 const baseNaming = { prefix: "", suffix: "Base" };
 

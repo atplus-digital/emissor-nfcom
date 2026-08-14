@@ -1,6 +1,6 @@
 import type { TaskRunner } from "@shared/types";
 import type { ListrTaskResult } from "listr2";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import { runPipelineStages } from "./runner";
 
 // Mock TaskRunner
@@ -36,7 +36,7 @@ describe("TC-UT-RUN-002: runPipelineStages handles multiple stages", () => {
 		runPipelineStages(context, [stage1, stage2], mockTask);
 
 		expect(mockTask.newListr).toHaveBeenCalled();
-		const callArg = vi.mocked(mockTask.newListr).mock.calls[0][0] as Array<{
+		const callArg = mockTask.newListr.mock.calls[0][0] as Array<{
 			title: string;
 		}>;
 		expect(callArg).toHaveLength(2);
@@ -79,7 +79,7 @@ describe("TC-UT-RUN-004: toHumanTitle converts camelCase via getStageTitle", () 
 
 		// newListr should be called with tasks that have titles derived from function names
 		expect(mockTask.newListr).toHaveBeenCalled();
-		const callArg = vi.mocked(mockTask.newListr).mock.calls[0][0] as Array<{
+		const callArg = mockTask.newListr.mock.calls[0][0] as Array<{
 			title: string;
 		}>;
 		// toHumanTitle capitalizes first letter: "fetchSchemas" -> "Fetch Schemas"
@@ -179,7 +179,7 @@ describe("TC-UT-RUN-009: Unnamed stage falls back to 'Estágio N' title", () => 
 		runPipelineStages(context, [stage1, stage2], mockTask);
 
 		expect(mockTask.newListr).toHaveBeenCalled();
-		const callArg = vi.mocked(mockTask.newListr).mock.calls[0][0] as Array<{
+		const callArg = mockTask.newListr.mock.calls[0][0] as Array<{
 			title: string;
 		}>;
 		// First stage should be "Estágio 1" (index 0 + 1)
@@ -239,7 +239,7 @@ describe("TC-UT-RUN-012: Multi-stage subtasks execute and update context", () =>
 
 		runPipelineStages(current, [stage1, stage2], mockTask);
 
-		const subTasks = vi.mocked(mockTask.newListr).mock.calls[0][0] as Array<{
+		const subTasks = mockTask.newListr.mock.calls[0][0] as Array<{
 			task: (
 				ctx: unknown,
 				stageTask: TaskRunner,
@@ -261,7 +261,7 @@ describe("TC-UT-RUN-012: Multi-stage subtasks execute and update context", () =>
 
 		runPipelineStages({}, [stage1, stage2], mockTask);
 
-		const subTasks = vi.mocked(mockTask.newListr).mock.calls[0][0] as Array<{
+		const subTasks = mockTask.newListr.mock.calls[0][0] as Array<{
 			task: () => Promise<unknown>;
 		}>;
 
@@ -306,7 +306,7 @@ describe("TC-UT-RUN-013: Single stage undefined and empty stage edge cases", () 
 
 		runPipelineStages({ step: 0 }, [stage1, stage2], mockTask);
 
-		const subTasks = vi.mocked(mockTask.newListr).mock.calls[0][0] as Array<{
+		const subTasks = mockTask.newListr.mock.calls[0][0] as Array<{
 			task: () => Promise<unknown>;
 		}>;
 
@@ -331,7 +331,7 @@ describe("TC-UT-RUN-013: Single stage undefined and empty stage edge cases", () 
 
 		runPipelineStages({}, [stage1, stage2], mockTask);
 
-		const subTasks = vi.mocked(mockTask.newListr).mock.calls[0][0] as Array<{
+		const subTasks = mockTask.newListr.mock.calls[0][0] as Array<{
 			task: () => Promise<unknown>;
 		}>;
 

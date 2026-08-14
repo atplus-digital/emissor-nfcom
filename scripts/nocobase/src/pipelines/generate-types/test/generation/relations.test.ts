@@ -6,7 +6,7 @@ import {
 	resolveRelationByType,
 	resolveRelationInterface,
 } from "@generators/pipelines/generate-types/content/relations";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 describe("resolveRelationInterface", () => {
 	it("returns null for null input", () => {

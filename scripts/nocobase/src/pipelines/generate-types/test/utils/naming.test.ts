@@ -9,7 +9,7 @@ import {
 	toScreamingSnakeCase,
 	toValidIdentifier,
 } from "@generators/pipelines/generate-types/utils/naming";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 describe("naming utilities", () => {
 	describe("removeAccents", () => {

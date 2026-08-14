@@ -1,26 +1,41 @@
-import { isPnpmCommand } from "@generators/test/path-helpers";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isBunxCommand } from "@generators/test/path-helpers";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	mock,
+} from "bun:test";
 
 // Mock execFile from node:child_process
+// bun: promisify(execFile) só reconhece o mock se execFile for o próprio vi.fn()
+// (um wrapper `(...args) => mockExecFile(...args)` faz o promisify do bun
+// cair no atalho nativo do módulo real).
 const mockExecFile = vi.fn();
-vi.mock("node:child_process", async (importOriginal) => {
-	const actual = await importOriginal();
+mock.module("node:child_process", () => {
+	// import.meta.require bypassa o mock e retorna o módulo real
+	const actual = import.meta.require("node:child_process");
 	return {
 		...(actual as object),
-		execFile: (...args: unknown[]) => mockExecFile(...args),
+		execFile: mockExecFile,
 		default: {
 			...(actual as object),
-			execFile: (...args: unknown[]) => mockExecFile(...args),
+			execFile: mockExecFile,
 		},
 	};
 });
 
-import { runLinterFix } from "./linter-runner";
+// Import dinâmico: o mock do Bun (mock.module) só é aplicado após o registro,
+// então o import do linter-runner deve acontecer depois para que ele capture
+// o execFile mockado.
+const { runLinterFix } = await import("./linter-runner");
 
-function findPnpmCall(predicate: (args: string[]) => boolean) {
+function findBunxCall(predicate: (args: string[]) => boolean) {
 	return mockExecFile.mock.calls.find(
 		(call) =>
-			isPnpmCommand(call[0] as string) && predicate(call[1] as string[]),
+			isBunxCommand(call[0] as string) && predicate(call[1] as string[]),
 	);
 }
 
@@ -62,11 +77,10 @@ describe("linter-runner", () => {
 		// Act
 		await runLinterFix(dirs);
 
-		// Assert - biome (pnpm exec biome) should be called
-		const biomeCall = findPnpmCall((args) => args.includes("biome"));
+		// Assert - biome (bunx biome) should be called
+		const biomeCall = findBunxCall((args) => args.includes("biome"));
 		expect(biomeCall).toBeDefined();
 		const [, args] = biomeCall as [string, string[]];
-		expect(args).toContain("exec");
 		expect(args).toContain("biome");
 		expect(args).toContain("check");
 		expect(args).toContain("--write");
@@ -82,11 +96,10 @@ describe("linter-runner", () => {
 		// Act
 		await runLinterFix(dirs);
 
-		// Assert - prettier (pnpm dlx prettier) should be called
-		const prettierCall = findPnpmCall((args) => args.includes("prettier"));
+		// Assert - prettier (bunx prettier) should be called
+		const prettierCall = findBunxCall((args) => args.includes("prettier"));
 		expect(prettierCall).toBeDefined();
 		const [, args] = prettierCall as [string, string[]];
-		expect(args).toContain("dlx");
 		expect(args).toContain("prettier");
 		expect(args).toContain("--write");
 		expect(args).toContain("--no-error-on-unmatched-pattern");
@@ -105,7 +118,7 @@ describe("linter-runner", () => {
 				_opts: unknown,
 				cb: (err: Error | null, stdout: string, stderr: string) => void,
 			) => {
-				if (isPnpmCommand(cmd) && args.includes("biome")) {
+				if (isBunxCommand(cmd) && args.includes("biome")) {
 					cb(new Error("biome not found"), "", "");
 					return;
 				}
@@ -126,7 +139,7 @@ describe("linter-runner", () => {
 		await runLinterFix(dirs);
 
 		// Assert - biome should be called with all directories
-		const biomeCall = findPnpmCall((args) => args.includes("biome"));
+		const biomeCall = findBunxCall((args) => args.includes("biome"));
 		expect(biomeCall).toBeDefined();
 		const [, args] = biomeCall as [string, string[]];
 		expect(args).toContain("/tmp/dir1");

@@ -6,7 +6,7 @@ import { fetchSchemas } from "@generators/pipelines/generate-types/stages/fetch-
 import { generateContentStage } from "@generators/pipelines/generate-types/stages/generate-content";
 import { writeFilesStage } from "@generators/pipelines/generate-types/stages/write-files";
 import { writeReportsStage } from "@generators/pipelines/generate-types/stages/write-reports";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { createMockField } from "../factories";
 import { createMockTask, createPipelineContext } from "../helpers";
 

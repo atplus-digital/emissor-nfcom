@@ -5,7 +5,7 @@ import {
 	generateRelationSchema,
 	generateUpdateSchema,
 } from "@generators/pipelines/generate-types/content/interfaces";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { createMockGeneratedTypes } from "../factories";
 
 describe("interfaces schema generation", () => {

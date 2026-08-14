@@ -2,7 +2,7 @@ import {
 	parseGeneratorFlags,
 	resolveGeneratorArgv,
 } from "@generators/lib/utils/args";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 describe("args", () => {
 	describe("resolveGeneratorArgv", () => {

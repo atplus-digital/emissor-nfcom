@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "bun:test";
 import type { CreateScriptTasksInput } from "../../generator-registry";
 import { createScriptTasks } from "./create-script-definition";
 
@@ -194,7 +194,7 @@ describe("TC-UT-CSD-008: createPipelineOptions stage runs generator CLI via List
 			}),
 		);
 
-		const mappedTask = vi.mocked(mockTask.newListr).mock.calls[0][0][0] as {
+		const mappedTask = mockTask.newListr.mock.calls[0][0][0] as {
 			task: (ctx: unknown, task: unknown) => unknown;
 		};
 		mappedTask.task({ value: 1 }, {});

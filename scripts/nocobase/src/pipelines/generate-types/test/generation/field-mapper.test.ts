@@ -3,7 +3,7 @@ import {
 	mapFieldType,
 } from "@generators/pipelines/generate-types/content/field-mapper";
 import { createMockField } from "@generators/pipelines/generate-types/test/factories";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 describe("mapFieldType", () => {
 	describe("context fields", () => {

@@ -1,6 +1,6 @@
 import type { DataSourceCollection } from "@generators/pipelines/generate-types/@types/script-data-source";
 import { resolveCollectionLabel } from "@generators/pipelines/generate-types/utils/resolve-collection-label";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 describe("resolveCollectionLabel", () => {
 	it("uses collection.title when present", () => {

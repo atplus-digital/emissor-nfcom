@@ -1,14 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	mock,
+} from "bun:test";
 
-vi.mock("@generators/lib/cli/cli-output", () => ({
+mock.module("@generators/lib/cli/cli-output", () => ({
 	writeCliError: vi.fn(),
 }));
 
-vi.mock("@generators/lib/validation/linter-runner", () => ({
+mock.module("@generators/lib/validation/linter-runner", () => ({
 	runLinterFix: vi.fn(async () => undefined),
 }));
 
-vi.mock("@generators/lib/validation/tsc-validator", () => ({
+mock.module("@generators/lib/validation/tsc-validator", () => ({
 	validateTypeScriptDirectory: vi.fn(async () => true),
 	validateTypeScriptFiles: vi.fn(async () => true),
 }));
@@ -23,10 +31,10 @@ import { runValidation } from "./atomic-writer";
 
 describe("atomic-writer runValidation", () => {
 	beforeEach(() => {
-		vi.mocked(validateTypeScriptDirectory).mockReset();
-		vi.mocked(validateTypeScriptFiles).mockReset();
-		vi.mocked(runLinterFix).mockReset();
-		vi.mocked(writeCliError).mockReset();
+		validateTypeScriptDirectory.mockReset();
+		validateTypeScriptFiles.mockReset();
+		runLinterFix.mockReset();
+		writeCliError.mockReset();
 	});
 
 	afterEach(() => {
@@ -34,7 +42,7 @@ describe("atomic-writer runValidation", () => {
 	});
 
 	it("returns true when validation and lint succeed", async () => {
-		vi.mocked(validateTypeScriptDirectory).mockResolvedValue(true);
+		validateTypeScriptDirectory.mockResolvedValue(true);
 
 		const result = await runValidation("/tmp/generated");
 
@@ -44,7 +52,7 @@ describe("atomic-writer runValidation", () => {
 	});
 
 	it("returns false and prints error when TypeScript validation fails", async () => {
-		vi.mocked(validateTypeScriptDirectory).mockResolvedValue(false);
+		validateTypeScriptDirectory.mockResolvedValue(false);
 
 		const result = await runValidation("/tmp/generated");
 
@@ -78,7 +86,7 @@ describe("atomic-writer runValidation", () => {
 	});
 
 	it("runs validation but skips lint when lint is false", async () => {
-		vi.mocked(validateTypeScriptFiles).mockResolvedValue(true);
+		validateTypeScriptFiles.mockResolvedValue(true);
 
 		const result = await runValidation(
 			{

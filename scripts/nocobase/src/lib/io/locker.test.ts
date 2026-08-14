@@ -1,6 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+
+const originalProcess = process;
 import { applyWorkspaceLockIfNeeded } from "./locker";
 
 // Helper to create a mock VSCode settings.json
@@ -17,10 +19,10 @@ describe("TC-UT-LK-001: applyWorkspaceLockIfNeeded locks workspace when not lock
 	const workspaceRoot = "/tmp/test-locker-workspace";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 	});
@@ -28,6 +30,7 @@ describe("TC-UT-LK-001: applyWorkspaceLockIfNeeded locks workspace when not lock
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-workspace", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should create settings.json with readonlyInclude when not locked", () => {
@@ -46,10 +49,10 @@ describe("TC-UT-LK-002: applyWorkspaceLockIfNeeded skips when already locked", (
 	const settingsPath = path.join(workspaceRoot, ".vscode", "settings.json");
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 		fs.writeFileSync(
@@ -61,6 +64,7 @@ describe("TC-UT-LK-002: applyWorkspaceLockIfNeeded skips when already locked", (
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-already", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should not modify settings when already locked", () => {
@@ -78,16 +82,17 @@ describe("TC-UT-LK-003: applyWorkspaceLockIfNeeded skips when lockWorkspaceFolde
 	const workspaceRoot = "/tmp/test-locker-skip";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 	});
 
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-skip", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should not create or modify settings when flag is false", () => {
@@ -103,16 +108,17 @@ describe("TC-UT-LK-004: applyWorkspaceLockIfNeeded handles missing .vscode dir",
 	const workspaceRoot = "/tmp/test-locker-no-vscode";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		// No .vscode directory
 	});
 
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-no-vscode", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should create .vscode directory when needed", () => {
@@ -127,16 +133,17 @@ describe("TC-UT-LK-005: applyWorkspaceLockIfNeeded adds custom output dirs", () 
 	const workspaceRoot = "/tmp/test-locker-custom";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 	});
 
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-custom", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should add custom output dir patterns", () => {
@@ -159,14 +166,15 @@ describe("TC-UT-LK-006: toReadonlyPattern handles absolute paths", () => {
 	const workspaceRoot = "/tmp/test-locker-abs";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 	});
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should convert absolute paths to relative posix patterns", () => {
@@ -188,16 +196,17 @@ describe("TC-UT-LK-007: isWorkspaceLocked returns false when no settings", () =>
 	const workspaceRoot = "/tmp/test-locker-no-settings";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		// No .vscode directory
 	});
 
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-no-settings", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should return false when settings.json does not exist", () => {
@@ -214,16 +223,17 @@ describe("TC-UT-LK-008: Lock file path is consistent for same output dir", () =>
 	const settingsPath = path.join(workspaceRoot, ".vscode", "settings.json");
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 	});
 
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-consistent", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should produce consistent lock entries for same directory", () => {
@@ -244,10 +254,10 @@ describe("TC-UT-LK-009: isWorkspaceLocked returns false when readonlyInclude is 
 	const workspaceRoot = "/tmp/test-locker-not-object";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 		// Create settings.json with files.readonlyInclude as a string (not an object)
 		const settingsPath = path.join(workspaceRoot, ".vscode", "settings.json");
@@ -260,6 +270,7 @@ describe("TC-UT-LK-009: isWorkspaceLocked returns false when readonlyInclude is 
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-not-object", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should return false when readonlyInclude is a string", () => {
@@ -277,10 +288,10 @@ describe("TC-UT-LK-011: isWorkspaceLocked detects custom output dir patterns", (
 	const settingsPath = path.join(workspaceRoot, ".vscode", "settings.json");
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 		fs.writeFileSync(
 			settingsPath,
@@ -295,6 +306,7 @@ describe("TC-UT-LK-011: isWorkspaceLocked detects custom output dir patterns", (
 	afterEach(() => {
 		fs.rmSync(workspaceRoot, { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should treat workspace as locked when custom output pattern exists", () => {
@@ -310,10 +322,10 @@ describe("TC-UT-LK-012: lockWorkspace surfaces write failures", () => {
 	const workspaceRoot = "/tmp/test-locker-lock-failure";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 		const settingsPath = path.join(workspaceRoot, ".vscode", "settings.json");
 		fs.writeFileSync(settingsPath, "{ invalid json");
@@ -322,6 +334,7 @@ describe("TC-UT-LK-012: lockWorkspace surfaces write failures", () => {
 	afterEach(() => {
 		fs.rmSync(workspaceRoot, { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should throw when settings.json cannot be parsed", () => {
@@ -335,10 +348,10 @@ describe("TC-UT-LK-014: lockWorkspace merges when readonlyInclude is not an obje
 	const workspaceRoot = "/tmp/test-locker-merge-invalid";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 		fs.writeFileSync(
 			path.join(workspaceRoot, ".vscode", "settings.json"),
@@ -349,6 +362,7 @@ describe("TC-UT-LK-014: lockWorkspace merges when readonlyInclude is not an obje
 	afterEach(() => {
 		fs.rmSync(workspaceRoot, { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should replace invalid readonlyInclude with generated patterns", () => {
@@ -369,10 +383,10 @@ describe("TC-UT-LK-010: isWorkspaceLocked returns false when readonlyInclude is 
 	const workspaceRoot = "/tmp/test-locker-null";
 
 	beforeEach(() => {
-		vi.stubGlobal("process", {
+		globalThis.process = {
 			...process,
 			cwd: () => workspaceRoot,
-		});
+		};
 		fs.mkdirSync(path.join(workspaceRoot, ".vscode"), { recursive: true });
 		// Create settings.json with files.readonlyInclude as null
 		const settingsPath = path.join(workspaceRoot, ".vscode", "settings.json");
@@ -385,6 +399,7 @@ describe("TC-UT-LK-010: isWorkspaceLocked returns false when readonlyInclude is 
 	afterEach(() => {
 		fs.rmSync("/tmp/test-locker-null", { recursive: true, force: true });
 		vi.restoreAllMocks();
+		globalThis.process = originalProcess;
 	});
 
 	it("should return false when readonlyInclude is null", () => {

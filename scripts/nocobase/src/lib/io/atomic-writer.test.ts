@@ -1,16 +1,24 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	mock,
+} from "bun:test";
 
-vi.mock("@generators/lib/cli/cli-output", () => ({
+mock.module("@generators/lib/cli/cli-output", () => ({
 	writeCliError: vi.fn(),
 }));
 
-vi.mock("@generators/lib/validation/linter-runner", () => ({
+mock.module("@generators/lib/validation/linter-runner", () => ({
 	runLinterFix: vi.fn(async () => undefined),
 }));
 
-vi.mock("@generators/lib/validation/tsc-validator", () => ({
+mock.module("@generators/lib/validation/tsc-validator", () => ({
 	validateTypeScriptDirectory: vi.fn(async () => true),
 	validateTypeScriptFiles: vi.fn(async () => true),
 }));
@@ -484,29 +492,11 @@ describe("TC-UT-AW-018: computeDiff mixed changed, unchanged, deleted, and new f
 	});
 });
 
-describe("TC-UT-AW-019: cleanupTempSessionDir skips Vitest coverage temp paths", () => {
-	const testRoot = "/tmp/test-cleanup-vitest-skip";
+describe("TC-UT-AW-019: cleanupTempSessionDir skips coverage temp paths", () => {
+	const testRoot = "/tmp/test-cleanup-coverage-skip";
 
 	afterEach(() => {
 		fs.rmSync(testRoot, { recursive: true, force: true });
-	});
-
-	it("should not remove paths under .vitest-coverage/.tmp", () => {
-		const tempDir = path.join(
-			testRoot,
-			".vitest-coverage",
-			".tmp",
-			`session-${Date.now()}`,
-		);
-		fs.mkdirSync(tempDir, { recursive: true });
-		fs.writeFileSync(path.join(tempDir, "coverage-artifact.json"), "{}");
-
-		cleanupTempSessionDir(tempDir);
-
-		expect(fs.existsSync(tempDir)).toBe(true);
-		expect(fs.existsSync(path.join(tempDir, "coverage-artifact.json"))).toBe(
-			true,
-		);
 	});
 
 	it("should not remove paths under coverage/.tmp", () => {
@@ -646,10 +636,10 @@ describe("TC-UT-AW-023: cleanupTempSessionDir non-.temp parent", () => {
 
 describe("TC-UT-AW-024: runValidation", () => {
 	beforeEach(() => {
-		vi.mocked(validateTypeScriptDirectory).mockReset();
-		vi.mocked(validateTypeScriptFiles).mockReset();
-		vi.mocked(runLinterFix).mockReset();
-		vi.mocked(writeCliError).mockReset();
+		validateTypeScriptDirectory.mockReset();
+		validateTypeScriptFiles.mockReset();
+		runLinterFix.mockReset();
+		writeCliError.mockReset();
 	});
 
 	afterEach(() => {
@@ -657,7 +647,7 @@ describe("TC-UT-AW-024: runValidation", () => {
 	});
 
 	it("returns true when validation and lint succeed", async () => {
-		vi.mocked(validateTypeScriptDirectory).mockResolvedValue(true);
+		validateTypeScriptDirectory.mockResolvedValue(true);
 
 		const result = await runValidation("/tmp/generated");
 
@@ -667,7 +657,7 @@ describe("TC-UT-AW-024: runValidation", () => {
 	});
 
 	it("returns false and prints error when TypeScript validation fails", async () => {
-		vi.mocked(validateTypeScriptDirectory).mockResolvedValue(false);
+		validateTypeScriptDirectory.mockResolvedValue(false);
 
 		const result = await runValidation("/tmp/generated");
 
@@ -701,7 +691,7 @@ describe("TC-UT-AW-024: runValidation", () => {
 	});
 
 	it("runs validation but skips lint when lint is false", async () => {
-		vi.mocked(validateTypeScriptDirectory).mockResolvedValue(true);
+		validateTypeScriptDirectory.mockResolvedValue(true);
 
 		const result = await runValidation("/tmp/generated", {
 			validate: true,
@@ -714,7 +704,7 @@ describe("TC-UT-AW-024: runValidation", () => {
 	});
 
 	it("validates changed files and lints affected directories", async () => {
-		vi.mocked(validateTypeScriptFiles).mockResolvedValue(true);
+		validateTypeScriptFiles.mockResolvedValue(true);
 
 		const result = await runValidation({
 			files: ["/tmp/generated/a.ts"],

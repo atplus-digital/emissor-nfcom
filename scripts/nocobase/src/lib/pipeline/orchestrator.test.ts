@@ -1,11 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	mock,
+} from "bun:test";
 
 // Mock lifecycle module
-vi.mock("@generators/lib/lifecycle/lifecycle", () => ({
+mock.module("@generators/lib/lifecycle/lifecycle", () => ({
 	runStandardPipeline: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@shared/utils/env", () => ({
+mock.module("@shared/utils/env", () => ({
 	env: {
 		VITE_LOG_LEVEL: "info",
 	},
@@ -55,10 +63,8 @@ describe("TC-UT-ORCH-001: Sequential run executes generators in order", () => {
 
 		expect(runStandardPipeline).toHaveBeenCalledTimes(2);
 		// Verify sequential execution by checking call order
-		expect(vi.mocked(runStandardPipeline).mock.calls[0][0].label).toBe(
-			"types-generator",
-		);
-		expect(vi.mocked(runStandardPipeline).mock.calls[1][0].label).toBe(
+		expect(runStandardPipeline.mock.calls[0][0].label).toBe("types-generator");
+		expect(runStandardPipeline.mock.calls[1][0].label).toBe(
 			"requests-generator",
 		);
 	});

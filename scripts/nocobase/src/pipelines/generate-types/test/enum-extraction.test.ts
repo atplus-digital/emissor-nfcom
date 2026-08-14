@@ -1,6 +1,6 @@
 import type { DataSourceField } from "@generators/pipelines/generate-types/@types/script-data-source";
 import { mapFieldType } from "@generators/pipelines/generate-types/content/field-mapper";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 describe("mapFieldType - Enum Extraction", () => {
 	it("should generate union type from uiSchema.enum for select field", () => {

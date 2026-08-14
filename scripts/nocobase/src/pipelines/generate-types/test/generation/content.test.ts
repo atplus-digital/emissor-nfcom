@@ -6,7 +6,7 @@ import {
 	generateSchemasContent,
 } from "@generators/pipelines/generate-types/content/assembly";
 import { generateCollectionInterfaces } from "@generators/pipelines/generate-types/content/interfaces";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import {
 	createMockCollectionTypesMap,
 	createMockGeneratedTypes,

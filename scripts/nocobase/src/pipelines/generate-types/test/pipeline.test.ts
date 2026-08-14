@@ -1,16 +1,12 @@
 import path from "node:path";
 import type { OrchestrationTaskRunner } from "@shared/types";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, mock } from "bun:test";
 
-const runStandardPipelineMock = vi.hoisted(() =>
-	vi.fn().mockResolvedValue(undefined),
-);
-const runPipelineStagesMock = vi.hoisted(() => vi.fn());
-const writeFilesStageMock = vi.hoisted(() =>
-	vi.fn(async (ctx: unknown) => ctx),
-);
+const runStandardPipelineMock = vi.fn().mockResolvedValue(undefined);
+const runPipelineStagesMock = vi.fn();
+const writeFilesStageMock = vi.fn(async (ctx: unknown) => ctx);
 
-vi.mock("@shared/utils/env", () => ({
+mock.module("@shared/utils/env", () => ({
 	resolveNocoBaseEnv: vi.fn(() => ({
 		baseUrl: "https://example.com/api",
 		token: "test-token",
@@ -18,19 +14,19 @@ vi.mock("@shared/utils/env", () => ({
 	})),
 }));
 
-vi.mock("@generators/lib/lifecycle/lifecycle", () => ({
+mock.module("@generators/lib/lifecycle/lifecycle", () => ({
 	runStandardPipeline: runStandardPipelineMock,
 }));
 
-vi.mock("@generators/lib/pipeline/runner", () => ({
+mock.module("@generators/lib/pipeline/runner", () => ({
 	runPipelineStages: runPipelineStagesMock,
 }));
 
-vi.mock("@generators/pipelines/generate-types/stages/write-files", () => ({
+mock.module("@generators/pipelines/generate-types/stages/write-files", () => ({
 	writeFilesStage: writeFilesStageMock,
 }));
 
-vi.mock("../../../../config/datasources", () => ({
+mock.module("../../../../config/datasources", () => ({
 	dataSourceConfigs: [
 		{
 			name: "mock-nocobase",
@@ -42,7 +38,7 @@ vi.mock("../../../../config/datasources", () => ({
 	],
 }));
 
-vi.mock("@shared/http/nocobase-client", () => ({
+mock.module("@shared/http/nocobase-client", () => ({
 	NocoBaseApiClient: class MockNocoBaseApiClient {
 		public baseUrl = "https://example.com/api";
 		public async fetchCollections() {

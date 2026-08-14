@@ -2,7 +2,7 @@ import {
 	_sortMapEntries,
 	_sortScalarEntries,
 } from "@generators/pipelines/generate-types/content/sorting";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 describe("field sorting helpers", () => {
 	it("orders scalar fields by category then alphabetically", () => {

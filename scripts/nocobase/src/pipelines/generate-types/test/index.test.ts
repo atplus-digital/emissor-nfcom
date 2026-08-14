@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, mock } from "bun:test";
 
-vi.mock("@shared/utils/env", () => ({
+mock.module("@shared/utils/env", () => ({
 	resolveNocoBaseEnv: vi.fn(() => ({
 		baseUrl: "https://example.com/api",
 		token: "test-token",

@@ -7,7 +7,7 @@ import {
 	getScalarFieldZodType,
 	toEnumMemberName,
 } from "@generators/pipelines/generate-types/content/enums";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 function emptyGeneratedTypes(
 	enums: GeneratedTypes["enums"] = new Map(),

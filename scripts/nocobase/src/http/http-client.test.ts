@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { fetchJsonWithAuth } from "./http-client";
 
 describe("http-client", () => {
@@ -26,7 +26,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			const result = await fetchJsonWithAuth<{ data: string }>(
 				"collections",
@@ -54,7 +54,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			// The function doesn't distinguish GET/POST, but we can test the URL construction
 			const result = await fetchJsonWithAuth<{ created: boolean }>(
@@ -82,7 +82,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await expect(
 				fetchJsonWithAuth("protected", defaultOptions),
@@ -98,7 +98,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await expect(fetchJsonWithAuth("error", defaultOptions)).rejects.toThrow(
 				"HTTP 500 Internal Server Error",
@@ -107,7 +107,7 @@ describe("http-client", () => {
 
 		it("TC-UT-HTTP-005: network error throws", async () => {
 			const mockFetch = vi.fn().mockRejectedValue(new Error("Network failure"));
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await expect(fetchJsonWithAuth("test", defaultOptions)).rejects.toThrow(
 				"Network failure",
@@ -124,14 +124,11 @@ describe("http-client", () => {
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
 			const mockAbort = vi.fn();
-			vi.stubGlobal("fetch", mockFetch);
-			vi.stubGlobal(
-				"AbortController",
-				class {
-					abort = mockAbort;
-					signal = {} as AbortSignal;
-				},
-			);
+			globalThis.fetch = mockFetch;
+			globalThis.AbortController = class {
+				abort = mockAbort;
+				signal = {} as AbortSignal;
+			};
 
 			await fetchJsonWithAuth("test", { ...defaultOptions, timeoutMs: 1000 });
 
@@ -146,7 +143,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await fetchJsonWithAuth("test", {
 				...defaultOptions,
@@ -173,7 +170,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			const customError = new Error("Custom not found");
 			const mapHttpError = vi.fn().mockReturnValue(customError);
@@ -202,7 +199,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await expect(fetchJsonWithAuth("test", defaultOptions)).rejects.toThrow(
 				"Invalid input: field X is required",
@@ -213,7 +210,7 @@ describe("http-client", () => {
 			const abortError = new DOMException("Aborted", "AbortError");
 
 			const mockFetch = vi.fn().mockRejectedValue(abortError);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await expect(
 				fetchJsonWithAuth("slow-endpoint", defaultOptions),
@@ -229,7 +226,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			const mapHttpError = vi.fn().mockReturnValue(undefined);
 
@@ -250,7 +247,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await expect(fetchJsonWithAuth("test", defaultOptions)).rejects.toThrow(
 				"HTTP 502 Bad Gateway em http://localhost:13000/test",
@@ -266,7 +263,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await expect(fetchJsonWithAuth("test", defaultOptions)).rejects.toThrow(
 				"resposta: line1 line2",
@@ -283,7 +280,7 @@ describe("http-client", () => {
 			};
 
 			const mockFetch = vi.fn().mockResolvedValue(mockResponse);
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			await expect(fetchJsonWithAuth("test", defaultOptions)).rejects.toThrow(
 				`resposta: ${"x".repeat(200)}`,
@@ -294,23 +291,20 @@ describe("http-client", () => {
 			vi.useFakeTimers();
 
 			const mockAbort = vi.fn();
-			vi.stubGlobal(
-				"AbortController",
-				class {
-					abort = mockAbort;
-					signal = {} as AbortSignal;
-				},
-			);
+			globalThis.AbortController = class {
+				abort = mockAbort;
+				signal = {} as AbortSignal;
+			};
 
 			const mockFetch = vi.fn(() => new Promise(() => {}));
-			vi.stubGlobal("fetch", mockFetch);
+			globalThis.fetch = mockFetch;
 
 			void fetchJsonWithAuth("slow-endpoint", {
 				...defaultOptions,
 				timeoutMs: 5000,
 			});
 
-			await vi.advanceTimersByTimeAsync(5000);
+			vi.advanceTimersByTime(5000);
 
 			expect(mockAbort).toHaveBeenCalled();
 

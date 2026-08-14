@@ -7,7 +7,7 @@ import {
 	validateTypeScriptDirectory,
 	validateTypeScriptFiles,
 } from "@generators/lib/validation/tsc-validator";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 describe("tsc-validator", () => {
 	let tempRoot = "";

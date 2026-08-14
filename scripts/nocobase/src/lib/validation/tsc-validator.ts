@@ -43,7 +43,37 @@ function getBuildInfoPath(cacheKey: string): string {
 		.replace(/[\\/]+/g, "_")
 		.replace(/[^a-zA-Z0-9_.-]/g, "_")
 		.slice(0, 120);
-	return path.join(CACHE_DIR, `${slug}.tsbuildinfo`);
+	const buildInfoPath = path.join(CACHE_DIR, `${slug}.tsbuildinfo`);
+
+	// Remove buildinfo de arquivos temporários de testes (prefixo `_tmp_`),
+	// que nunca são reusados em produção e acumulariam indefinidamente.
+	if (slug.startsWith("_tmp_")) {
+		return buildInfoPath;
+	}
+	pruneStaleTempBuildInfos();
+
+	return buildInfoPath;
+}
+
+/**
+ * Remove entradas de cache geradas por arquivos temporários de testes
+ * (`_tmp_tsc-validator-*`), que não têm valor de reuso fora da suíte de testes.
+ */
+function pruneStaleTempBuildInfos(): void {
+	let entries: string[];
+	try {
+		entries = fs.readdirSync(CACHE_DIR);
+	} catch {
+		return;
+	}
+	for (const entry of entries) {
+		if (!entry.startsWith("_tmp_")) continue;
+		try {
+			fs.rmSync(path.join(CACHE_DIR, entry), { force: true });
+		} catch {
+			// Best-effort: ignora falhas de remoção (arquivo em uso, etc.)
+		}
+	}
 }
 
 export function listTypeScriptFilesInDirectory(dirPath: string): string[] {
