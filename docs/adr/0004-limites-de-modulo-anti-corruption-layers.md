@@ -158,6 +158,11 @@ test -d src && (grep -rn ": any\|as any\|Record<string, unknown>" src/ --include
 
 ## Notas
 
+- **Estratégia de teste das ACLs**: cada módulo é testado contra **fixtures capturadas**
+  dos provedores (sandbox/homologação) — requisições/respostas reais congeladas em
+  arquivos versionados no repo, com fetch mockado fazendo replay. Garante que o
+  contrato simulado bate no real (divergência aparece na próxima captura), sem
+  chamadas de rede no teste.
 - Os tipos de domínio podem ser **gerados** do NocoBase (já existe `scripts/nocobase/`
   gerando tipos), mas consumidos apenas dentro de `modules/atacado/translators/` e
   traduzidos para tipos de domínio — nunca importados diretamente pelo resto do app.

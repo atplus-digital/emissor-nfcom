@@ -122,6 +122,25 @@ correspondente.
 single-instance do SQLite (ADR-0003). SQLite não é compartilhado entre pods; escalar a
 múltiplas instâncias exige migrar o store de coordenação (Postgres) — ADR futuro.
 
+**Fan-out via Flows (parent/child)**: `emit-fatura` é o **parent** de um Flow BullMQ
+cujos children são os jobs `emit-cobranca` (que por sua vez enfileiram `emit-nfcom`).
+O callback do parent dispara quando todos os filhos resolvem (sucesso ou falha
+exausta) e consolida o estado final da fatura (`emitida`/`parcial`/`erro`, SPEC-0001)
+— sem contador de conclusão próprio no SQLite. Primitiva nativa do BullMQ; a
+alternativa rejeitada (contador transacional local) duplicaria estado que o Redis já
+tem e seria suscetível a contagem presa.
+
+**Política de retry e item falho**: jobs de emissão usam padrão de **5 tentativas**
+com backoff exponencial. Exauridas, o item vai para `erro` no Atacado via outbox e o
+job permanece visível como `failed` no BullMQ (Board) para inspeção/reprocesso manual
+— **sem DLQ dedicada** (um componente a menos para operar; o Board cumpre o papel de
+inspeção).
+
+**Healthcheck e graceful shutdown**: `GET /health` (liveness) responde 200 se o
+processo está de pé e o SQLite responde a um ping — sem readiness que dependa dos
+provedores externos (a disponibilidade deles não tira o pod do ar). Shutdown drena o
+job em andamento com **timeout de 30s** antes de sair.
+
 ## Consequências
 
 **Positivas:**

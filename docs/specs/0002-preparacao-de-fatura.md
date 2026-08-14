@@ -233,6 +233,11 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
   `f_cidade`, `f_uf`), lido do cadastro no Atacado — a SPEC-0001 não preenche
   endereço no payload, apenas reusa o que está na nota. Destinatário sem endereço
   completo → `422` (caso 13).
+- **Disparo é externo**: não há scheduler interno — a preparação é disparada por
+  chamada à API (operador ou sistema do AT+). Agendamento mensal, se um dia for
+  exigido, é SPEC/ADR futuros.
+- **Fuso horário**: datas puras (`YYYY-MM-DD`) computadas em `America/Sao_Paulo`
+  (decisão canônica em CONVENTIONS.md).
 
 ## Definition of Done
 

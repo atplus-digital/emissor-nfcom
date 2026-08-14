@@ -41,6 +41,15 @@ envelope canônico, serializado por Hono (ADR-0005):
 - Env nova (novo provedor, feature flag, default fiscal) entra primeiro no schema
   de `src/env.ts`, com validação/default lá — nunca no call site.
 
+## Datas e fuso horário
+
+- O fuso horário do domínio é **`America/Sao_Paulo`**, declarado como constante —
+  nunca o fuso do container (UTC em produção). `dataReferencia`/`dataVencimento` e
+  janelas de faturamento mensal são computadas nesse fuso.
+- Datas de domínio sem hora do dia são representadas como **datas puras**
+  (`YYYY-MM-DD`); timestamps de eventos (webhook, outbox) são ISO 8601 UTC no wire e
+  convertidos ao fuso do domínio no uso.
+
 ## Acesso a dados
 
 - **CRM Atacado** é a fonte de domínio (faturas, cobranças, notas). O app lê e escreve
@@ -51,6 +60,32 @@ envelope canônico, serializado por Hono (ADR-0005):
 - **Writes ao Atacado de mudança de estado de emissão** passam pelo outbox (entrega
   ao-menos-uma-vez, ADR-0003/ADR-0002). Reads são diretos pela porta `atacado`.
 - **Writes a Asaas/NFCom** são precedidos pela consulta à idempotency key (ADR-0003).
+
+## Logging
+
+Decisão de arquitetura em ADR-0008 (pino, ALS, redação). Regras de uso:
+
+- **Uma instância só**: `import { log } from 'src/lib/logger'` — nunca
+  instanciar pino ou usar `console.*` em `src/**`.
+- **Formato**: JSON em produção, pretty em dev (`pino-pretty`), decidido pelo
+  factory — nunca no call site.
+- **Contexto de correlação** (faturaId, jobId, fila, metodo/rota) entra via
+  `AsyncLocalStorage` populado pelo middleware Hono e pelo wrapper de jobs
+  BullMQ — nunca como campo avulso no call site. Buscar por `faturaId` no
+  agregador deve recuperar o fluxo inteiro.
+- **Níveis**: `error` = falha com stack (`log.error({ err }, "msg")` — objeto,
+  não interpolação); `warn` = retry, degradação, caso de borda previsto;
+  `info` = transição de estado e evento de negócio; `debug` = verbosidade de
+  diagnóstico (`LOG_LEVEL`).
+- **Redação (lista canônica)**: CPF/CNPJ e headers de autenticação
+  (`access_token`, `X-API-Key`, `X-Webhook-Signature`, `Authorization`) são
+  redigidos no factory, por allowlist — payloads externos nunca são logados
+  crus; logar referências (`cobrancaId`, `notaId`), não corpos.
+- **Erro logado uma vez**: rota loga no error handler canônico (com `tipo` do
+  envelope de erro e status); worker loga no catch do wrapper (com fila e
+  `jobId`). Camada intermediária não repita.
+- **Eventos de mudança de estado** (SPEC-0001) logam `info` com
+  `faturaId` + estado novo, correlacionando com o webhook empurrado.
 
 ## Comandos canônicos de teste
 

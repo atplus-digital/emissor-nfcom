@@ -112,6 +112,15 @@ Concretamente:
    stalled/failed), não por timer de relógio. As idempotency keys filhas
    (`cobranca:{id}:boleto`, `nfcom:{id}:emitir`) garantem que, ao reassumir, cobranças/notas
    já emitidas são puladas — sem duplicação.
+4. **Referência própria nos serviços externos (dedup no buraco pós-POST)**: a
+   idempotency key local não cobre o crash **entre** o POST ao serviço externo e a
+   resolução da key (a escrita aconteceu no mundo, mas o estado local não sabe). Para
+   fechar esse buraco, toda escrita carrega uma **referência própria determinística**
+   (`externalReference`): `cobranca:{id}` no boleto Asaas, `nfcom:{id}` na emissão do
+   gateway NFCom. No retry pós-crash, o job **consulta o serviço pela referência antes
+   de re-emitir**: se a consulta encontra a escrita anterior, resolve a key com o
+   retorno dela; só re-emite se a consulta não encontrar nada. Correlação a posteriori
+   que é consultada **antes** de agir — não dedup a posteriori (SPEC-0001 casos 5/15).
 
 ## Consequências
 

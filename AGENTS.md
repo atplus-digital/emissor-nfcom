@@ -29,6 +29,9 @@ com idempotência/outbox (SQLite). Stack: Bun + Hono + Drizzle + Zod 4. Interno 
   (ADR-0002/0003). Escalar = ADR futuro de migração para Postgres.
 - Env validada por Zod em `src/env.ts` (`@t3-oss/env-core`, ADR-0005) — nunca
   `process.env` direto (exceção: scripts de tooling fora do app).
+- Migrations Drizzle: `bunx drizzle-kit generate` ao mudar `src/db/schema.ts`; o SQL
+  gerado é **revisado no PR**; `bunx drizzle-kit migrate` roda no boot do pod
+  (idempotente).
 
 ## Como rodar localmente
 

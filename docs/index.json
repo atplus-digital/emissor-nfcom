@@ -73,6 +73,34 @@
     "implemented-by": []
   },
   {
+    "id": "ADR-0007",
+    "path": "docs/adr/0007-estrutura-de-pastas-camadas.md",
+    "layer": "adr",
+    "title": "Estrutura de pastas: camadas com domínio no centro",
+    "status": "proposed",
+    "builds-on": [
+      "ADR-0004",
+      "ADR-0002",
+      "ADR-0005"
+    ],
+    "superseded-by": null,
+    "implemented-by": []
+  },
+  {
+    "id": "ADR-0008",
+    "path": "docs/adr/0008-logging-estruturado-pino.md",
+    "layer": "adr",
+    "title": "Logging estruturado com pino: correlação por AsyncLocalStorage e redação explícita",
+    "status": "proposed",
+    "builds-on": [
+      "ADR-0005",
+      "ADR-0007",
+      "ADR-0002"
+    ],
+    "superseded-by": null,
+    "implemented-by": []
+  },
+  {
     "id": "SPEC-0001",
     "path": "docs/specs/0001-fluxo-de-emissao-de-fatura.md",
     "layer": "specs",
