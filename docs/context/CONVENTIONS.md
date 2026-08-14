@@ -27,6 +27,9 @@ envelope canônico, serializado por Hono (ADR-0005):
   → `401`.
 - O endpoint de webhook de saída é autenticado por um `X-Webhook-Signature` (HMAC do
   corpo com segredo `WEBHOOK_SECRET`) para que o cliente verifique a origem.
+  `WEBHOOK_SECRET` é **obrigatório quando `WEBHOOK_URL` está configurada** (validado em
+  `src/env.ts`); com `WEBHOOK_URL` vazia, o push é desativado (SPEC-0001 caso 14) e o
+  segredo é opcional.
 - As credenciais dos provedores externos (Asaas, NFCom, Atacado) vivem só em env e
   nunca saem nas respostas/logs (redação pino, ADR-0005).
 
@@ -53,5 +56,5 @@ envelope canônico, serializado por Hono (ADR-0005):
 
 ```bash
 bun run typecheck   # exit 0
-bun test            # N/N verdes
+bun run test        # N/N verdes (bun test --isolate, script canônico)
 ```
