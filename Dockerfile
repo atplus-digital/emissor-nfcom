@@ -12,6 +12,10 @@ RUN bun install --frozen-lockfile
 # Build do bundle
 COPY src ./src
 COPY tsconfig.json ./
+# Migrations Drizzle (ADR-0003): o runtime copia deste stage para aplicar no boot
+# (`bunx drizzle-kit migrate` no CMD). Sem isso, o COPY do runtime falha.
+COPY drizzle ./drizzle
+COPY drizzle.config.ts ./drizzle.config.ts
 RUN bun run build
 
 # ---------- Runtime stage ----------
