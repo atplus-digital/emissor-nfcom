@@ -35,8 +35,16 @@ const REPORTS_OUTPUT = ".reports/generate-types/report.md";
 // ──────────────────────────────────────────────
 
 class NocoBaseDataSourceClient extends NocoBaseApiClient {
-	public constructor(baseUrl: string, token: string, timeoutMs: number) {
-		super({ baseUrl, token, timeoutMs });
+	public constructor(
+		baseUrl: string,
+		token: string,
+		timeoutMs: number,
+		requestHeaders?: Record<string, string>,
+	) {
+		super(
+			{ baseUrl, token, timeoutMs },
+			requestHeaders ? { requestHeaders } : undefined,
+		);
 	}
 
 	/**
@@ -56,11 +64,13 @@ function createDataSourceClient(credentials: {
 	baseUrl: string;
 	token: string;
 	timeoutMs: number;
+	requestHeaders?: Record<string, string>;
 }): DataSourceClient {
 	const inner = new NocoBaseDataSourceClient(
 		credentials.baseUrl,
 		credentials.token,
 		credentials.timeoutMs,
+		credentials.requestHeaders,
 	);
 
 	return {
@@ -114,6 +124,7 @@ export function createGenerateTypesPipeline(): RunGeneratorCliOptions<object> {
 						baseUrl: env.baseUrl,
 						token: env.token,
 						timeoutMs: env.timeoutMs,
+						requestHeaders: env.requestHeaders,
 					});
 
 					const executeAllDataSourcesStage: AsyncPipelineStage<

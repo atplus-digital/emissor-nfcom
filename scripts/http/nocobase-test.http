@@ -1,0 +1,16 @@
+# Teste de conexão com o nocobase
+
+@baseUrl = {{$dotenv NOCOBASE_API_URL}}
+@token = {{$dotenv NOCOBASE_API_KEY}}
+
+
+### Validar schema da collection
+# @name getCollection
+GET {{baseUrl}}/collections:list
+Authorization: Bearer {{token}}
+Content-Type: application/json
+X-App: a_atacado
+
+{
+
+}

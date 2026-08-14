@@ -317,7 +317,12 @@ export function generateSchemasContent(
 		}
 	}
 
-	for (const [importPath, schemaNames] of externalImports) {
+	// Ordena por importPath para garantir output determinístico, independentemente
+	// da ordem em que a API retorna os campos de relação.
+	const sortedImportEntries = [...externalImports.entries()].sort(([a], [b]) =>
+		a.localeCompare(b),
+	);
+	for (const [importPath, schemaNames] of sortedImportEntries) {
 		const sorted = [...schemaNames].sort();
 		if (sorted.length <= 4) {
 			lines.push(`import { ${sorted.join(", ")} } from "${importPath}";`);

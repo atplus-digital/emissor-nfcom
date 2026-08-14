@@ -13,7 +13,7 @@ NOCOBASE_API_URL=https://seu-nocobase.com/api
 NOCOBASE_API_KEY=seu-token-admin
 ```
 
-Opcional: `VITE_LOG_LEVEL=debug` para stack trace em falhas. Timeout fixo de 15s.
+Opcional: `NOCOBASE_APP=<app>` para enviar o header `X-App` (necessário quando a API exige multi-app, ex.: `a_atacado`). `VITE_LOG_LEVEL=debug` para stack trace em falhas. Timeout fixo de 15s.
 
 ## Comandos
 
@@ -28,7 +28,10 @@ Flags diretas no orquestrador:
 pnpm generate --types          # só tipos
 pnpm generate --all            # todos explicitamente
 pnpm generate --concurrent     # execução paralela
+pnpm generate --diff-debug     # escreve diff unificado temp vs output em .reports/generate-types/diff-debug.txt
 ```
+
+`--diff-debug` é modo de diagnóstico: quando o pipeline reporta mudança entre gerações consecutivas com a mesma entrada, essa flag grava, para cada arquivo alterado, um diff unificado (`@@ ... @@`) apontando as linhas exatas que diferem. Útil para localizar não-determinismo na geração.
 
 Testes e lint dos scripts: `pnpm test:scripts`, `pnpm biome:scripts`.
 

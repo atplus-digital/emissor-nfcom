@@ -13,7 +13,9 @@ import {
 	type PipelineReportsContext,
 	renderReportsMarkdown,
 } from "@generators/lib/pipeline/reports";
+import { writeDiffDebug } from "@generators/lib/io/diff-debug";
 import { listTypeScriptFilesInDirectory } from "@generators/lib/validation/tsc-validator";
+import { isDiffDebug } from "@generators/lib/validation/diff-debug-options";
 import { isValidationSkipped } from "@generators/lib/validation/validation-options";
 import type { TaskRunner } from "@shared/types";
 import type { PipelineExecutionContext } from "../pipeline/context";
@@ -215,6 +217,29 @@ export async function diffTempVsOutput(
 
 	ctx.diffs = diffs;
 	ctx.hasChanges = hasChanges;
+
+	// Modo de diagnóstico: gera diff unificado por arquivo para localizar
+	// não-determinismo quando há mudança entre gerações consecutivas.
+	if (hasChanges && isDiffDebug()) {
+		const pairs: Array<{
+			tempDir: string;
+			outputDir: string;
+			label: string;
+		}> = [];
+		for (const outputDir of params.outputDirs) {
+			const tempOutputDir = path.join(params.tempDir, outputDir);
+			const resolvedOutputDir = path.resolve(outputDir);
+			if (fs.existsSync(tempOutputDir)) {
+				pairs.push({
+					tempDir: tempOutputDir,
+					outputDir: resolvedOutputDir,
+					label: outputDir,
+				});
+			}
+		}
+		const reportsDir = path.join(params.cwd, ".reports", "generate-types");
+		writeDiffDebug(pairs, reportsDir);
+	}
 }
 
 /** Task 4 — No changes: cleanup and render reports */

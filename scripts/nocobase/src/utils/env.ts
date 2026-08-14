@@ -29,6 +29,7 @@ export const env = createEnv({
 			.string()
 			.trim()
 			.min(1, "NOCOBASE_API_KEY é obrigatório"),
+		NOCOBASE_APP: z.string().trim().optional(),
 		VITE_LOG_LEVEL: z.enum(["info", "debug"]).default("info"),
 	},
 	emptyStringAsUndefined: true,
@@ -47,6 +48,7 @@ interface ResolvedNocoBaseEnv {
 	token: string;
 	timeoutMs: number;
 	logLevel: "error" | "warn" | "info" | "debug";
+	requestHeaders?: Record<string, string>;
 }
 
 /**
@@ -58,5 +60,8 @@ export function resolveNocoBaseEnv(): ResolvedNocoBaseEnv {
 		token: env.NOCOBASE_API_KEY,
 		timeoutMs: 15_000,
 		logLevel: env.VITE_LOG_LEVEL,
+		requestHeaders: env.NOCOBASE_APP
+			? { "X-App": env.NOCOBASE_APP }
+			: undefined,
 	};
 }

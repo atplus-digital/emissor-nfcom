@@ -16,7 +16,6 @@ out/
 
 # IDE
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -28,7 +27,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
-
+.reports
 # Coverage
 coverage/
 *.lcov
@@ -38,7 +37,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache/
 *.tsbuildinfo
 .eslintcache
+.backup
 
+# Temp de execução dos geradores
+.temp/
 # Python
 __pycache__/
 *.pyc

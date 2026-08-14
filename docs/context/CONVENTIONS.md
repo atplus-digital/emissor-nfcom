@@ -1,0 +1,57 @@
+# Convenções compartilhadas
+
+Capítulo de contexto: convenções imperativas e atemporais que SPECs e ADRs **apontam**
+em vez de repetir. Apenas decisões já estabilizadas; pendência vai a `docs/BACKLOG.md`,
+não aqui.
+
+## Envelope de erro HTTP
+
+Toda resposta de erro das rotas (`POST /faturas/{id}/emitir`, `GET .../emissao`) usa o
+envelope canônico, serializado por Hono (ADR-0005):
+
+```json
+{ "erro": { "tipo": "string", "mensagem": "string", "detalhe": {} } }
+```
+
+- `tipo` é um código estável da taxonomia do app (`CONFLITO`, `VALIDACAO`,
+  `NAO_ENCONTRADO`, `ERRO_INTERNO`), não o nome da classe de erro.
+- Códigos de status HTTP: `409` (emissão em curso/concluída — SPEC-0001 caso 1),
+  `422` (validação bloqueante — casos 3, 4, 8), `404` (fatura inexistente), `500`
+  (erro interno não-classificado).
+- Erros de validação do Zod (rota) viram `422` com `detalhe` listando os campos.
+
+## Autorização
+
+- A API do emissor é interna (chamada por sistemas do AT+). Autenticação por API key
+  no header `X-API-Key`, validada por Zod (`EMISSOR_API_KEY`, ADR-0005). Sem key/errada
+  → `401`.
+- O endpoint de webhook de saída é autenticado por um `X-Webhook-Signature` (HMAC do
+  corpo com segredo `WEBHOOK_SECRET`) para que o cliente verifique a origem.
+- As credenciais dos provedores externos (Asaas, NFCom, Atacado) vivem só em env e
+  nunca saem nas respostas/logs (redação pino, ADR-0005).
+
+## Variáveis de ambiente
+
+- Toda variável de ambiente usada pelo app é declarada e validada em `src/env.ts`
+  via `@t3-oss/env-core` + Zod (ADR-0005) — `process.env` direto fora de
+  `src/env.ts` é proibido no app (exceção: scripts de tooling fora do app).
+- Env nova (novo provedor, feature flag, default fiscal) entra primeiro no schema
+  de `src/env.ts`, com validação/default lá — nunca no call site.
+
+## Acesso a dados
+
+- **CRM Atacado** é a fonte de domínio (faturas, cobranças, notas). O app lê e escreve
+  no Atacado pela porta do módulo `atacado` (ADR-0004).
+- **SQLite local** guarda só metadado de coordenação (idempotency keys, outbox, lease
+  de fatura — ADR-0003). Nunca define o que é uma fatura; apenas o estado de
+  coordenação da sua emissão.
+- **Writes ao Atacado de mudança de estado de emissão** passam pelo outbox (entrega
+  ao-menos-uma-vez, ADR-0003/ADR-0002). Reads são diretos pela porta `atacado`.
+- **Writes a Asaas/NFCom** são precedidos pela consulta à idempotency key (ADR-0003).
+
+## Comandos canônicos de teste
+
+```bash
+bun run typecheck   # exit 0
+bun test            # N/N verdes
+```

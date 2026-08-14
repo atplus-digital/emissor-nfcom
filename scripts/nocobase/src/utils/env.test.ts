@@ -1,12 +1,18 @@
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	mock,
+} from "bun:test";
 
-const { mockLoadDotEnv } = vi.hoisted(() => ({
-	mockLoadDotEnv: vi.fn(),
-}));
+const mockLoadDotEnv = vi.fn();
 
-vi.mock("dotenv", () => ({
+mock.module("dotenv", () => ({
 	config: mockLoadDotEnv,
 }));
 
@@ -19,7 +25,6 @@ describe("env", () => {
 	const originalEnv = { ...process.env };
 
 	beforeEach(() => {
-		vi.resetModules();
 		mockLoadDotEnv.mockClear();
 		process.env = { ...VALID_ENV };
 	});
@@ -29,11 +34,15 @@ describe("env", () => {
 		vi.restoreAllMocks();
 	});
 
+	// bun: re-import com query-string re-executa o top-level do módulo
+	// (que chama loadDotEnv), equivalente ao resetModules de outros runners.
+	let envImportCounter = 0;
 	async function importEnvModule(
 		envVars: Record<string, string | undefined> = { ...VALID_ENV },
 	) {
 		process.env = { ...envVars };
-		return import("./env");
+		envImportCounter += 1;
+		return import(`./env?fresh=${envImportCounter}`);
 	}
 
 	describe("dotenv loading", () => {
@@ -125,6 +134,23 @@ describe("env", () => {
 			expect(env.NOCOBASE_API_URL).toBe("http://localhost:13000");
 			expect(env.NOCOBASE_API_KEY).toBe("test-token");
 			expect(env.VITE_LOG_LEVEL).toBe("info");
+		});
+
+		it("TC-UT-ENV-013: includes X-App requestHeaders when NOCOBASE_APP is set", async () => {
+			const { resolveNocoBaseEnv } = await importEnvModule({
+				...VALID_ENV,
+				NOCOBASE_APP: "a_atacado",
+			});
+			const result = resolveNocoBaseEnv();
+
+			expect(result.requestHeaders).toEqual({ "X-App": "a_atacado" });
+		});
+
+		it("TC-UT-ENV-014: omits requestHeaders when NOCOBASE_APP is unset", async () => {
+			const { resolveNocoBaseEnv } = await importEnvModule();
+			const result = resolveNocoBaseEnv();
+
+			expect(result.requestHeaders).toBeUndefined();
 		});
 	});
 

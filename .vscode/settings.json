@@ -1,0 +1,38 @@
+{
+	"files.watcherExclude": {},
+	"search.exclude": {},
+	"files.readonlyInclude": {
+		".husky/**": true,
+		"node_modules/**": true,
+		"src/generated/**": true,
+		"dist": true
+	},
+	"tailwindCSS.lint.suggestCanonicalClasses": "warning",
+	"[javascript]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[javascriptreact]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[typescript]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[typescriptreact]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[json]": {
+		"editor.defaultFormatter": "vscode.json-language-features"
+	},
+	"[jsonc]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"[css]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"editor.codeActionsOnSave": {
+		"source.fix.biome": "explicit",
+		"source.organizeImports.biome": "explicit"
+	},
+	"cSpell.import": ["../cspell.config.yaml"],
+	"markdown.validate.enabled": true
+}

@@ -1,6 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	mock,
+} from "bun:test";
 
-vi.mock("@shared/http/http-client", () => ({
+mock.module("@shared/http/http-client", () => ({
 	fetchJsonWithAuth: vi.fn(),
 }));
 
@@ -10,7 +18,7 @@ import {
 	type NocoBaseApiCredentials,
 } from "./nocobase-client";
 
-const mockFetchJsonWithAuth = vi.mocked(fetchJsonWithAuth);
+const mockFetchJsonWithAuth = fetchJsonWithAuth;
 
 const defaultCredentials: NocoBaseApiCredentials = {
 	baseUrl: "http://localhost:13000/api",

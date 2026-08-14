@@ -9,11 +9,13 @@ import {
 } from "@generators/lib/utils/args";
 import { env } from "@shared/utils/env";
 import { GENERATOR_REGISTRY } from "./generator-registry";
+import { setDiffDebug } from "./lib/validation/diff-debug-options";
 import { setValidationSkipped } from "./lib/validation/validation-options";
 
 const CONCURRENT_FLAG = "--concurrent" as const;
 const ALL_FLAG = "--all" as const;
 const SKIP_VALIDATE_FLAG = "--skip-validate" as const;
+const DIFF_DEBUG_FLAG = "--diff-debug" as const;
 
 async function main(): Promise<void> {
 	const registryFlags = GENERATOR_REGISTRY.map((entry) => entry.flag);
@@ -27,12 +29,21 @@ async function main(): Promise<void> {
 
 	const { selectedGeneratorFlags, selectedAdditionalFlags } =
 		parseGeneratorFlags(args, registryFlags, {
-			additionalAllowedFlags: [CONCURRENT_FLAG, ALL_FLAG, SKIP_VALIDATE_FLAG],
+			additionalAllowedFlags: [
+				CONCURRENT_FLAG,
+				ALL_FLAG,
+				SKIP_VALIDATE_FLAG,
+				DIFF_DEBUG_FLAG,
+			],
 			defaultSelectedFlags: defaultFlags,
 		});
 
 	if (selectedAdditionalFlags.has(SKIP_VALIDATE_FLAG)) {
 		setValidationSkipped(true);
+	}
+
+	if (selectedAdditionalFlags.has(DIFF_DEBUG_FLAG)) {
+		setDiffDebug(true);
 	}
 
 	const generators = GENERATOR_REGISTRY.filter((entry) =>
