@@ -101,6 +101,19 @@
     "implemented-by": []
   },
   {
+    "id": "ADR-0009",
+    "path": "docs/adr/0009-migrations-drizzle-geradas-sem-edicao-manual.md",
+    "layer": "adr",
+    "title": "Migrations de BD são geradas pelo drizzle-kit, nunca escritas à mão",
+    "status": "proposed",
+    "builds-on": [
+      "ADR-0003",
+      "ADR-0005"
+    ],
+    "superseded-by": null,
+    "implemented-by": []
+  },
+  {
     "id": "SPEC-0001",
     "path": "docs/specs/0001-fluxo-de-emissao-de-fatura.md",
     "layer": "specs",

@@ -12,3 +12,4 @@
 | [ADR-0006](0006-tipos-de-crm-gerados-por-script.md) | Tipos de CRM/Atacado/IXC sempre gerados por script, nunca escritos à mão | proposed |
 | [ADR-0007](0007-estrutura-de-pastas-camadas.md) | Estrutura de pastas: camadas com domínio no centro | proposed |
 | [ADR-0008](0008-logging-estruturado-pino.md) | Logging estruturado com pino: correlação por AsyncLocalStorage e redação explícita | proposed |
+| [ADR-0009](0009-migrations-drizzle-geradas-sem-edicao-manual.md) | Migrations de BD são geradas pelo drizzle-kit, nunca escritas à mão | proposed |
