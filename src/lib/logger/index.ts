@@ -20,6 +20,7 @@ import { getLogContext, type LogContext } from "./context.ts";
  * - headers de autenticação: access_token, X-API-Key, X-Webhook-Signature, Authorization.
  */
 const REDACT_PATHS = [
+	// Top-level (call site logs o campo direto).
 	"cpfcnpj",
 	"documento",
 	"cpf",
@@ -28,6 +29,38 @@ const REDACT_PATHS = [
 	"X-API-Key",
 	"X-Webhook-Signature",
 	"Authorization",
+	// Aninhado (revisão m1): pino/fast-redact casa `*` a um segmento (chave de
+	// objeto OU índice de array). `**` NÃO é deep-wildcard no fast-redact — então
+	// enumeramos as profundidades plausíveis do domínio (cobranca.notas[].cpfcnpj,
+	// destinatario.cpfcnpj, nota.cpfcnpj, ...). `*` cobre o nível do array.
+	"*.cpfcnpj",
+	"*.documento",
+	"*.cpf",
+	"*.cnpj",
+	"*.access_token",
+	"*.X-API-Key",
+	"*.X-Webhook-Signature",
+	"*.Authorization",
+	"*.*.cpfcnpj",
+	"*.*.documento",
+	"*.*.cpf",
+	"*.*.cnpj",
+	"*.*.access_token",
+	"*.*.X-API-Key",
+	"*.*.X-Webhook-Signature",
+	"*.*.Authorization",
+	"*.*.*.cpfcnpj",
+	"*.*.*.documento",
+	"*.*.*.cpf",
+	"*.*.*.cnpj",
+	"*.*.*.access_token",
+	"*.*.*.X-API-Key",
+	"*.*.*.X-Webhook-Signature",
+	"*.*.*.Authorization",
+	"*.*.*.*.cpfcnpj",
+	"*.*.*.*.documento",
+	"*.*.*.*.cpf",
+	"*.*.*.*.cnpj",
 ];
 
 export interface CreateLoggerOptions {

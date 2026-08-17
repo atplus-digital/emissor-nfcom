@@ -16,7 +16,7 @@ import {
 describe("POST /faturas/preparar — validação (SPEC-0002 casos 1,2,3,4,13)", () => {
 	test("caso 1: parceiro não encontrado → 422", async () => {
 		const app = criarFaturasRoutes({
-			atacado: fakeAtacado({ buscarParceiroPorId: async () => null as any }),
+			atacado: fakeAtacado({ buscarParceiroPorId: async () => null }),
 			queue: fakeQueue(),
 		});
 		const res = await app.request("/faturas/preparar", {

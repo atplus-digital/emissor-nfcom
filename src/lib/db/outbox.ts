@@ -1,4 +1,4 @@
-import { eq, asc, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { CoordDB } from "#/lib/db/client";
 import { outbox } from "#/lib/db/schema";
 
@@ -7,6 +7,12 @@ import { outbox } from "#/lib/db/schema";
  * outbox: a mudança de estado do job + a mensagem outbox são escritas juntas (mesma
  * transação SQLite), e um relay (fila `outbox`, ADR-0002) drena e entrega ao Atacado
  * com retry — entrega ao-menos-uma-vez, idempotente por update por id.
+ *
+ * `drainOutbox` é ATÔMICO (revisão M2): reivindica (`claim`) as rows mudando status
+ * `pending → processing` num UPDATE atômico com RETURNING, de modo que dois relays
+ * concorrentes não entregam a mesma row. A entrega é ao-menos-uma-vez; a
+ * idempotência reside no Atacado (update por id). Em falha, `incOutboxAttempts`
+ * devolve a row a `pending` (para retry).
  */
 
 export interface OutboxMessage {
@@ -46,17 +52,24 @@ export async function enqueueOutbox(db: DB, msg: OutboxMessage): Promise<void> {
 }
 
 /**
- * Drena até `limit` mensagens pendentes, na ordem por id (mais antiga primeiro).
- * O relay é responsável por marcar done / incrementar tentativas após a entrega.
+ * Drena até `limit` mensagens, **reivindicando-as atomicamente** (`pending → processing`).
+ * Dois drains concorrentes não recebem a mesma row (cada row é claimada por um só).
+ * O relay marca `markOutboxDone` após entrega com sucesso; em falha, `incOutboxAttempts`
+ * devolve a row a `pending`.
  */
 export async function drainOutbox(db: DB, limit: number): Promise<OutboxRow[]> {
-	const rows = await db
-		.select()
-		.from(outbox)
-		.where(eq(outbox.status, "pending"))
-		.orderBy(asc(outbox.id))
-		.limit(limit);
-	return rows.map((r) => ({
+	// Atomic claim: UPDATE ... WHERE id IN (SELECT pending ORDER BY id LIMIT ?) RETURNING *.
+	// O subselect + update atômico evita a race do SELECT-then-act. Usamos o query
+	// builder .returning() do drizzle (API tipada que devolve as rows), sobre a
+	// subquery de claim.
+	const claimed = await db
+		.update(outbox)
+		.set({ status: "processing" })
+		.where(
+			sql`id IN (SELECT id FROM outbox WHERE status='pending' ORDER BY id LIMIT ${limit})`,
+		)
+		.returning();
+	return claimed.map((r) => ({
 		id: r.id,
 		aggregate: r.aggregate,
 		aggregateId: r.aggregateId,
@@ -75,9 +88,11 @@ export async function markOutboxDone(db: DB, id: number): Promise<void> {
 }
 
 /**
- * Incrementa o contador de tentativas de entrega (para observabilidade/backoff).
+ * Incrementa o contador de tentativas e **devolve a row a `pending`** (para retry).
  */
 export async function incOutboxAttempts(db: DB, id: number): Promise<void> {
-	// Incremento atômico via SQL para evitar race entre o relay e retries.
-	await db.run(sql`UPDATE outbox SET attempts = attempts + 1 WHERE id = ${id}`);
+	// Incremento atômico; volta a `pending` para o relay tentar de novo no próximo ciclo.
+	await db.run(
+		sql`UPDATE outbox SET attempts = attempts + 1, status='pending' WHERE id = ${id}`,
+	);
 }

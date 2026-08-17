@@ -72,6 +72,18 @@ describe("logger — redação (ADR-0008 redação por allowlist)", () => {
 		expect(out).not.toContain("Bearer abc");
 		expect(out).toContain("[Redacted]");
 	});
+
+	test("m1: CPF/CNPJ aninhado (cobranca.notas[].cpfcnpj) é redigido", () => {
+		const { dest, lines } = captureLines();
+		const log = createLogger({ destination: dest });
+		log.info(
+			{ cobranca: { notas: [{ cpfcnpj: "11122233344", nome: "x" }] } },
+			"emitindo",
+		);
+		const out = lines.join("");
+		expect(out).not.toContain("11122233344");
+		expect(out).toContain("[Redacted]");
+	});
 });
 
 describe("logger — contexto por AsyncLocalStorage (ADR-0008 ALS)", () => {

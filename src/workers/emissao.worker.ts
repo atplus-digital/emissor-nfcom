@@ -254,8 +254,12 @@ export async function handleEmitCobranca(
 		try {
 			const acquired = await acquireKey(db, key, "asaas");
 			if (acquired.status === "resolved") {
-				// key resolvida → reutiliza (caso 5, caminho já-resolvido)
-				await commitCobranca(atacado, db, d.cobrancaId, acquired.externalId, "");
+				// key resolvida → reutiliza idExterno. A key só guarda externalId (não o
+				// linkFatura), então re-busca o link no Asaas para não perdê-lo (m3).
+				const ref = `cobranca:${d.cobrancaId}`;
+				const existente = await asaas.consultarBoletoPorExternalReference(ref);
+				const linkFatura = existente?.linkFatura ?? "";
+				await commitCobranca(atacado, db, d.cobrancaId, acquired.externalId, linkFatura);
 				boletoOk = true;
 			} else {
 				// in_progress: pode ser 1ª tentativa OU retry pós-crash (caso 5)
@@ -383,6 +387,12 @@ export async function handleEmitNfcom(
 		const key = `nfcom:${d.notaId}:emitir`;
 		const acquired = await acquireKey(db, key, "nfcom");
 		if (acquired.status === "resolved") {
+			// sentinel "processando": o gateway ack o POST e está processando (caso 6).
+			// Não é um crash (caso 15) — o POST sucedeu. Continua retrying até o gateway
+			// devolver situação final (ou exaurir tentativas → caso 17). Não re-emite.
+			if (acquired.externalId === "processando") {
+				throw new ErroRetryable(`nota ${d.notaId} ainda processando no gateway`);
+			}
 			// nota já emitida → reutiliza chave/protocolo
 			await enqueueOutbox(db, {
 				aggregate: "nota",
@@ -434,7 +444,11 @@ export async function handleEmitNfcom(
 			});
 			const map = mapearSituacaoNota(res.situacao);
 			if (map.statusInterno === "a-emitir") {
-				// processando (caso 6) → retry
+				// processando (caso 6) → o POST sucedeu (gateway ack e está processando).
+				// Marca a key com sentinel "processando" (resolved c/ externalId="processando")
+				// para que um retry NÃO re-emita (zero duplicação) nem dispare o caso 15
+				// (que é para crash sem ack do gateway). Continua retrying até situação final.
+				await resolveKey(db, key, "processando");
 				throw new ErroRetryable(`nota ${d.notaId} processando no gateway`);
 			}
 			await resolveKey(db, key, res.chave);

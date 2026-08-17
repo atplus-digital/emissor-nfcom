@@ -11,6 +11,7 @@ import type { Cliente, ErroValidacao, Fatura, Parceiro, Plano, TipoFaturamento }
 import { construirPlanoCobrancas } from "./plano-cobrancas";
 import { normalizarDataReferencia } from "./normalizacao";
 import { calcularDataVencimento } from "./vencimento";
+import type { DefaultsFiscais } from "./defaults-fiscais";
 
 /**
  * Filtra clientes que têm ao menos uma linha válida (plano existe e preço > 0).
@@ -45,6 +46,7 @@ export function calcularFatura(
 	planos: Plano[],
 	dataReferencia: string,
 	tipoFaturamento: TipoFaturamento,
+	defaultsFiscais: DefaultsFiscais,
 ): ResultadoCalculo {
 	const erros: ErroValidacao[] = [];
 	const refNormalizada = normalizarDataReferencia(dataReferencia);
@@ -71,7 +73,7 @@ export function calcularFatura(
 		};
 	}
 
-	const cobrancas = construirPlanoCobrancas(validos, parceiro, tipoFaturamento, dataVencimento);
+	const cobrancas = construirPlanoCobrancas(validos, parceiro, tipoFaturamento, dataVencimento, defaultsFiscais);
 	const valorTotal = cobrancas.reduce((acc, c) => acc + c.valorTotal, 0);
 
 	// Caso 11: consistência defensiva (não deveria divergir — cálculo é determinístico).

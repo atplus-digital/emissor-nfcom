@@ -11,9 +11,24 @@
  *
  * O `fetch` é injetável p/ testes (mock). Em produção usa o global do Bun.
  */
-import { env } from "#/env";
+import { log } from "#/lib/logger";
 
 export type FetchLike = typeof fetch;
+
+/** Cache do env lido de forma preguiçosa — só dispara validação quando o caller
+ * não injeta baseUrl/apiKey/app (testes injetam, evitando o custo de env real).
+ * Mesmo padrão do asaas.client (ADR-0004). */
+let _envCache: { baseUrl: string; apiKey: string; app: string } | null = null;
+async function envOrThrow(): Promise<{ baseUrl: string; apiKey: string; app: string }> {
+	if (_envCache) return _envCache;
+	const { env } = await import("#/env");
+	_envCache = {
+		baseUrl: env.NOCOBASE_API_URL,
+		apiKey: env.NOCOBASE_API_KEY,
+		app: env.NOCOBASE_APP ?? "",
+	};
+	return _envCache;
+}
 
 export interface ListQuery {
 	filterByTk?: number | string;
@@ -30,16 +45,45 @@ export interface AtacadoClient {
 	destroy(colecao: string, id: number): Promise<void>;
 }
 
-export function createAtacadoClient(fetchFn: FetchLike = fetch): AtacadoClient {
-	const base = env.NOCOBASE_API_URL.replace(/\/$/, "");
-	const app = env.NOCOBASE_APP ? `/${env.NOCOBASE_APP}` : "";
-	const headers = (): Record<string, string> => ({
+export interface CreateAtacadoClientOpts {
+	fetchImpl?: FetchLike;
+	baseUrl?: string;
+	apiKey?: string;
+	app?: string;
+}
+
+/**
+ * Factory do cliente NocoBase. Em produção lê `env.NOCOBASE_*` de forma
+ * preguiçosa; em teste, injeta via `opts` (mesmo padrão do asaas.client).
+ */
+export function createAtacadoClient(opts: CreateAtacadoClientOpts = {}): AtacadoClient {
+	const fetchImpl = opts.fetchImpl ?? fetch;
+	const resolveCreds = async () => {
+		// Só dispara validação de env quando algum opt está ausente (testes
+		// injetam tudo; produção deixa cair em envOrThrow). Mesmo padrão do asaas.
+		if (opts.baseUrl && opts.apiKey && opts.app !== undefined) {
+			return {
+				baseUrl: opts.baseUrl.replace(/\/$/, ""),
+				apiKey: opts.apiKey,
+				app: opts.app,
+			};
+		}
+		const e = await envOrThrow();
+		return {
+			baseUrl: (opts.baseUrl ?? e.baseUrl).replace(/\/$/, ""),
+			apiKey: opts.apiKey ?? e.apiKey,
+			app: opts.app ?? e.app,
+		};
+	};
+
+	const headers = (apiKey: string): Record<string, string> => ({
 		"Content-Type": "application/json",
-		Authorization: `Bearer ${env.NOCOBASE_API_KEY}`,
+		Authorization: `Bearer ${apiKey}`,
 	});
 
-	const url = (colecao: string, acao: string, query?: Record<string, unknown>) => {
-		const u = new URL(`${base}${app}/api/${colecao}:${acao}`);
+	const url = (base: string, app: string, colecao: string, acao: string, query?: Record<string, unknown>) => {
+		const appPath = app ? `/${app}` : "";
+		const u = new URL(`${base}${appPath}/api/${colecao}:${acao}`);
 		if (query) {
 			for (const [k, v] of Object.entries(query)) {
 				if (v === undefined) continue;
@@ -58,45 +102,61 @@ export function createAtacadoClient(fetchFn: FetchLike = fetch): AtacadoClient {
 
 	return {
 		async get(colecao, query) {
-			const res = await fetchFn(url(colecao, "get", query as Record<string, unknown>), {
+			const { baseUrl, apiKey, app } = await resolveCreds();
+			const res = await fetchImpl(url(baseUrl, app, colecao, "get", query as Record<string, unknown>), {
 				method: "GET",
-				headers: headers(),
+				headers: headers(apiKey),
 			});
 			return json(res);
 		},
 		async list(colecao, query) {
+			const { baseUrl, apiKey, app } = await resolveCreds();
 			const q = { pageSize: 9999, ...query } as Record<string, unknown>;
-			const res = await fetchFn(url(colecao, "list", q), { method: "GET", headers: headers() });
+			const res = await fetchImpl(url(baseUrl, app, colecao, "list", q), {
+				method: "GET",
+				headers: headers(apiKey),
+			});
 			const data: any = await json(res);
 			// NocoBase: resposta pode vir como { data: [...] } ou array direto
 			return Array.isArray(data) ? data : (data?.data ?? []);
 		},
 		async create(colecao, body) {
-			const res = await fetchFn(url(colecao, "create"), {
+			const { baseUrl, apiKey, app } = await resolveCreds();
+			const res = await fetchImpl(url(baseUrl, app, colecao, "create"), {
 				method: "POST",
-				headers: headers(),
+				headers: headers(apiKey),
 				body: JSON.stringify(body),
 			});
 			return json(res);
 		},
 		async update(colecao, id, body) {
-			const res = await fetchFn(url(colecao, "update", { filterByTk: id }), {
+			const { baseUrl, apiKey, app } = await resolveCreds();
+			const res = await fetchImpl(url(baseUrl, app, colecao, "update", { filterByTk: id }), {
 				method: "POST",
-				headers: headers(),
+				headers: headers(apiKey),
 				body: JSON.stringify(body),
 			});
-			if (!res.ok) throw new AtacadoError(`Atacado update ${res.status}`, res.status, await res.text());
+			if (!res.ok) {
+				log.warn({ status: res.status, colecao, id }, "atacado: update não-2xx");
+				throw new AtacadoError(`Atacado update ${res.status}`, res.status, await res.text());
+			}
 		},
 		async destroy(colecao, id) {
-			const res = await fetchFn(url(colecao, "destroy", { filterByTk: id }), {
+			const { baseUrl, apiKey, app } = await resolveCreds();
+			const res = await fetchImpl(url(baseUrl, app, colecao, "destroy", { filterByTk: id }), {
 				method: "POST",
-				headers: headers(),
+				headers: headers(apiKey),
 			});
-			if (!res.ok) throw new AtacadoError(`Atacado destroy ${res.status}`, res.status, await res.text());
+			if (!res.ok) {
+				log.warn({ status: res.status, colecao, id }, "atacado: destroy não-2xx");
+				throw new AtacadoError(`Atacado destroy ${res.status}`, res.status, await res.text());
+			}
 		},
 	};
 }
 
+/** Erro tipado do Atacado. `isRetryable()` classifica para o worker decidir
+ * retry (5xx/408/429/rede) vs fatal (4xx negócio) — ADR-0004. */
 export class AtacadoError extends Error {
 	constructor(
 		message: string,
@@ -105,5 +165,10 @@ export class AtacadoError extends Error {
 	) {
 		super(message);
 		this.name = "AtacadoError";
+	}
+
+	/** 5xx/408/429 → retryable; 4xx → fatal. */
+	isRetryable(): boolean {
+		return this.statusCode >= 500 || this.statusCode === 408 || this.statusCode === 429;
 	}
 }

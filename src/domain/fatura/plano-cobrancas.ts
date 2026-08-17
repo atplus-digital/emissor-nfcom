@@ -19,39 +19,38 @@ import type {
 	Parceiro,
 	TipoFaturamento,
 } from "#/domain/types";
+import type { DefaultsFiscais } from "./defaults-fiscais";
 
-const FISCAL_DEFAULTS = {
-	cfop: "6102",
-	cclass: "", // preenchido pelo caller (env FISCAL_CCLASS_DEFAULT) no cálculo
-	aliqIcms: 0,
-	incideAliquota: false,
-};
-
-function itemDeLinha(descricao: string, unitario: number, quantidade: number): Item {
+function itemDeLinha(
+	descricao: string,
+	unitario: number,
+	quantidade: number,
+	defaults: DefaultsFiscais,
+): Item {
 	const total = unitario * quantidade;
 	return {
 		descricao,
-		cfop: FISCAL_DEFAULTS.cfop,
-		cclass: FISCAL_DEFAULTS.cclass,
+		cfop: defaults.cfop,
+		cclass: defaults.cclass,
 		quantidade,
 		unitario,
 		total,
-		aliqIcms: FISCAL_DEFAULTS.aliqIcms,
+		aliqIcms: defaults.aliqIcms,
 		bcIcms: total,
-		icms: Math.round(total * FISCAL_DEFAULTS.aliqIcms),
-		incideAliquota: FISCAL_DEFAULTS.incideAliquota,
+		icms: Math.round(total * defaults.aliqIcms),
+		incideAliquota: defaults.aliqIcms > 0,
 	};
 }
 
-function itensDoCliente(c: Cliente): Item[] {
-	return c.linhas.map((l) => itemDeLinha(l.descricao, l.unitario, l.quantidade));
+function itensDoCliente(c: Cliente, defaults: DefaultsFiscais): Item[] {
+	return c.linhas.map((l) => itemDeLinha(l.descricao, l.unitario, l.quantidade, defaults));
 }
 
 function totalCliente(c: Cliente): number {
 	return c.linhas.reduce((acc, l) => acc + l.unitario * l.quantidade, 0);
 }
 
-function notaParaCliente(c: Cliente, cobrancaId: number): Nota {
+function notaParaCliente(c: Cliente, cobrancaId: number, defaults: DefaultsFiscais): Nota {
 	return {
 		cobrancaId,
 		nome: c.nome,
@@ -64,12 +63,17 @@ function notaParaCliente(c: Cliente, cobrancaId: number): Nota {
 		cidade: c.endereco.cidade,
 		statusInterno: "a-emitir",
 		total: totalCliente(c),
-		itens: itensDoCliente(c),
+		itens: itensDoCliente(c, defaults),
 	};
 }
 
-function notaParaParceiro(p: Parceiro, cobrancaId: number, clientes: Cliente[]): Nota {
-	const itens = clientes.flatMap(itensDoCliente);
+function notaParaParceiro(
+	p: Parceiro,
+	cobrancaId: number,
+	clientes: Cliente[],
+	defaults: DefaultsFiscais,
+): Nota {
+	const itens = clientes.flatMap((c) => itensDoCliente(c, defaults));
 	const total = itens.reduce((acc, i) => acc + i.total, 0);
 	return {
 		cobrancaId,
@@ -115,6 +119,7 @@ export function construirPlanoCobrancas(
 	parceiro: Parceiro,
 	tipoFaturamento: TipoFaturamento,
 	dataVencimento: string,
+	defaultsFiscais: DefaultsFiscais,
 ): Cobranca[] {
 	switch (tipoFaturamento) {
 		case "parceiro":
@@ -123,17 +128,17 @@ export function construirPlanoCobrancas(
 					parceiro,
 					clientes,
 					dataVencimento,
-					[notaParaParceiro(parceiro, 0, clientes)],
+					[notaParaParceiro(parceiro, 0, clientes, defaultsFiscais)],
 				),
 			];
 		case "via-parceiro":
 		case "cofaturamento": {
-			const notas = clientes.map((c) => notaParaCliente(c, 0));
+			const notas = clientes.map((c) => notaParaCliente(c, 0, defaultsFiscais));
 			return [cobrancaUnicaParceiro(parceiro, clientes, dataVencimento, notas)];
 		}
 		case "cliente-final":
 			return clientes.map((c) => {
-				const nota = notaParaCliente(c, 0);
+				const nota = notaParaCliente(c, 0, defaultsFiscais);
 				return {
 					faturaId: 0,
 					valorTotal: nota.total,

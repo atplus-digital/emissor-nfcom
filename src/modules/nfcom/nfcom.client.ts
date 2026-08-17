@@ -10,8 +10,18 @@
  * `env` (NFCOM_API_URL/LOGIN/SENHA). Lança `NfcomApiError` em non-2xx,
  * expondo `status` p/ o repository decidir reauth (401).
  */
-import { env } from "#/env";
 import type { ApiNFComEmitir, NFComResposta } from "./translators/emitir";
+
+/** Cache do env lido de forma preguiçosa — só dispara validação quando o caller
+ * não injeta baseUrl (testes injetam, evitando o custo de env real). Mesmo
+ * padrão do asaas.client/atacado.client (ADR-0004). */
+let _envBaseUrl: string | null = null;
+async function envBaseUrl(): Promise<string> {
+	if (_envBaseUrl !== null) return _envBaseUrl;
+	const { env } = await import("#/env");
+	_envBaseUrl = env.NFCOM_API_URL;
+	return _envBaseUrl;
+}
 
 export interface NfcomApiError extends Error {
 	status: number;
@@ -34,6 +44,11 @@ export interface NfcomClient {
 	): Promise<NFComListaItemResposta[]>;
 }
 
+export interface CriarNfcomClientOpts {
+	fetchImpl?: typeof fetch;
+	baseUrl?: string;
+}
+
 function makeError(status: number, body: unknown): NfcomApiError {
 	const e = new Error(
 		`NFCom HTTP ${status}: ${typeof body === "string" ? body : JSON.stringify(body)}`,
@@ -43,17 +58,22 @@ function makeError(status: number, body: unknown): NfcomApiError {
 	return e;
 }
 
-/** Cria o cliente HTTP real do gateway NFCom (fetch-based). */
-export function criarNfcomClient(baseUrl: string = env.NFCOM_API_URL): NfcomClient {
+/** Cria o cliente HTTP do gateway NFCom (fetch-based). Em produção lê
+ * `env.NFCOM_API_URL` de forma preguiçosa; em teste, injeta via `opts`. */
+export function criarNfcomClient(opts: CriarNfcomClientOpts = {}): NfcomClient {
+	const fetchImpl = opts.fetchImpl ?? fetch;
+	const resolveBaseUrl = async () => opts.baseUrl ?? (await envBaseUrl());
+
 	async function request<T>(
 		path: string,
 		options: { method: string; token?: string; body?: unknown },
 	): Promise<T> {
+		const baseUrl = await resolveBaseUrl();
 		const headers: Record<string, string> = {
 			"Content-Type": "application/json",
 		};
 		if (options.token) headers.Authorization = `Bearer ${options.token}`;
-		const res = await fetch(`${baseUrl}${path}`, {
+		const res = await fetchImpl(`${baseUrl}${path}`, {
 			method: options.method,
 			headers,
 			body: options.body ? JSON.stringify(options.body) : undefined,

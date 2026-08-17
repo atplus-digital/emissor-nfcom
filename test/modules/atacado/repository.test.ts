@@ -1,5 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { AtacadoClient } from "#/modules/atacado/atacado.client";
+import { AtacadoError, type AtacadoClient } from "#/modules/atacado/atacado.client";
 import { AtacadoRepository } from "#/modules/atacado/atacado.repository";
 
 /** Constrói um mock do AtacadoClient com spies registrando as chamadas. */
@@ -249,6 +249,29 @@ describe("AtacadoRepository > atualização de estado", () => {
 			f_mensagem: "timeout",
 			f_status_code: "504",
 		});
+	});
+});
+
+describe("AtacadoRepository > buscarParceiroPorId — 404 → null", () => {
+	it("retorna null quando o Atacado responde 404 (registro não encontrado)", async () => {
+		const { client } = mockClient({
+			get: async () => {
+				throw new AtacadoError("Atacado 404", 404, "not found");
+			},
+		});
+		const repo = new AtacadoRepository(client);
+		const p = await repo.buscarParceiroPorId(999);
+		expect(p).toBeNull();
+	});
+
+	it("propaga erro não-404 (ex.: 500)", async () => {
+		const { client } = mockClient({
+			get: async () => {
+				throw new AtacadoError("Atacado 500", 500, "boom");
+			},
+		});
+		const repo = new AtacadoRepository(client);
+		await expect(repo.buscarParceiroPorId(1)).rejects.toBeInstanceOf(AtacadoError);
 	});
 });
 

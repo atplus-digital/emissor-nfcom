@@ -93,7 +93,7 @@ export interface RegistrarErroInput {
 
 export interface AtacadoPort {
 	// Leitura (fonte de domínio)
-	buscarParceiroPorId(parceiroId: number): Promise<Parceiro>;
+	buscarParceiroPorId(parceiroId: number): Promise<Parceiro | null>;
 	buscarClientesAtivosPorParceiro(parceiroId: number): Promise<Cliente[]>;
 	buscarPlanosDeServico(): Promise<Plano[]>;
 	buscarFaturaPorChave(

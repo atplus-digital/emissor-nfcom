@@ -69,17 +69,19 @@ describe("schema: tabelas de coordenação (ADR-0003)", () => {
 });
 
 describe("idempotency: acquireKey / resolveKey / getKey", () => {
-	test("acquireKey em key nova → in_progress, sem external_id", async () => {
+	test("acquireKey em key nova → in_progress, acquired=true (é a dona)", async () => {
 		const r = await acquireKey(db, "cobranca:42:boleto", "asaas.boleto");
 		expect(r.status).toBe("in_progress");
 		expect(r.externalId).toBeNull();
+		expect(r.acquired).toBe(true);
 	});
 
-	test("acquireKey na mesma key novamente → in_progress, não resolve", async () => {
+	test("acquireKey na mesma key novamente → in_progress, acquired=false (outro é dono)", async () => {
 		await acquireKey(db, "cobranca:42:boleto", "asaas.boleto");
 		const r = await acquireKey(db, "cobranca:42:boleto", "asaas.boleto");
 		expect(r.status).toBe("in_progress");
 		expect(r.externalId).toBeNull();
+		expect(r.acquired).toBe(false);
 	});
 
 	test("resolveKey → status resolved + external_id persistido", async () => {
@@ -90,22 +92,39 @@ describe("idempotency: acquireKey / resolveKey / getKey", () => {
 		expect(k?.externalId).toBe("pay_abc123");
 	});
 
-	test("acquireKey em key já resolvida → retorna external_id (caminho de reuso)", async () => {
+	test("acquireKey em key já resolvida → retorna external_id (reuso, acquired=false)", async () => {
 		await acquireKey(db, "cobranca:42:boleto", "asaas.boleto");
 		await resolveKey(db, "cobranca:42:boleto", "pay_abc123");
 		const r = await acquireKey(db, "cobranca:42:boleto", "asaas.boleto");
 		expect(r.status).toBe("resolved");
 		expect(r.externalId).toBe("pay_abc123");
+		expect(r.acquired).toBe(false);
 	});
 
 	test("getKey em key inexistente → null", async () => {
 		const k = await getKey(db, "inexistente");
 		expect(k).toBeNull();
 	});
+
+	test("C1: dois acquireKey concorrentes na mesma key → exatamente um acquired=true", async () => {
+		// Race simulada: dois acquireKey "simultâneos" (Promise.all). O INSERT atômico
+		// com ON CONFLICT DO NOTHING garante que só um insere; o outro re-lê in_progress
+		// com acquired=false. Sem o fix, ambos poderiam passar e duplicar a escrita.
+		const [a, b] = await Promise.all([
+			acquireKey(db, "cobranca:99:boleto", "asaas.boleto"),
+			acquireKey(db, "cobranca:99:boleto", "asaas.boleto"),
+		]);
+		const acquired = [a.acquired, b.acquired].filter(Boolean);
+		expect(acquired.length).toBe(1);
+		const owners = [a, b].filter((r) => r.acquired);
+		expect(owners[0].status).toBe("in_progress");
+		const non = [a, b].filter((r) => !r.acquired);
+		expect(non[0].status).toBe("in_progress");
+	});
 });
 
 describe("outbox: enqueue / drain / markDone / incAttempts", () => {
-	test("enqueueOutbox insere pending", async () => {
+	test("enqueueOutbox insere pending; drainOutbox reivindica (status processing)", async () => {
 		await enqueueOutbox(db, {
 			aggregate: "fatura",
 			aggregateId: 1,
@@ -114,7 +133,7 @@ describe("outbox: enqueue / drain / markDone / incAttempts", () => {
 		const pending = await drainOutbox(db, 10);
 		expect(pending.length).toBe(1);
 		expect(pending[0].aggregate).toBe("fatura");
-		expect(pending[0].status).toBe("pending");
+		expect(pending[0].status).toBe("processing");
 		expect(pending[0].attempts).toBe(0);
 	});
 
@@ -133,12 +152,28 @@ describe("outbox: enqueue / drain / markDone / incAttempts", () => {
 		expect(next.length).toBe(0);
 	});
 
-	test("incOutboxAttempts incrementa o contador", async () => {
+	test("incOutboxAttempts incrementa o contador e devolve a pending", async () => {
 		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 1, payload: {} });
-		const pending = await drainOutbox(db, 10);
-		await incOutboxAttempts(db, pending[0].id);
+		const claimed = await drainOutbox(db, 10); // → processing
+		await incOutboxAttempts(db, claimed[0].id); // → pending + attempts+1
 		const again = await drainOutbox(db, 10);
 		expect(again[0].attempts).toBe(1);
+		expect(again[0].status).toBe("processing"); // re-claimada
+	});
+
+	test("M2: dois drains concorrentes — nenhuma row claimada por ambos", async () => {
+		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 1, payload: {} });
+		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 2, payload: {} });
+		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 3, payload: {} });
+		const [a, b] = await Promise.all([drainOutbox(db, 2), drainOutbox(db, 2)]);
+		const idsA = a.map((r) => r.id);
+		const idsB = b.map((r) => r.id);
+		// Sem claim atômico, os dois drains pegariam as mesmas rows. Com claim, não há
+		// intersecção.
+		const intersecao = idsA.filter((id) => idsB.includes(id));
+		expect(intersecao.length).toBe(0);
+		// Juntos cobrem até 3 rows (limit 2 cada, mas só há 3 pending).
+		expect(new Set([...idsA, ...idsB]).size).toBeGreaterThanOrEqual(3);
 	});
 
 	test("payload é serializado como JSON e recuperável", async () => {
@@ -171,5 +206,14 @@ describe("fatura_lease: acquireLease / releaseLease / hasLease", () => {
 		expect(await hasLease(db, 101)).toBe(false);
 		const got = await acquireLease(db, 101);
 		expect(got).toBe(true);
+	});
+
+	test("M1: dois acquireLease concorrentes na mesma fatura → exatamente um true", async () => {
+		const [a, b] = await Promise.all([
+			acquireLease(db, 200),
+			acquireLease(db, 200),
+		]);
+		const trues = [a, b].filter(Boolean);
+		expect(trues.length).toBe(1);
 	});
 });

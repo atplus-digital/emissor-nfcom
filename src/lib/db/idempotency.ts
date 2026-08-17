@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { CoordDB } from "#/lib/db/client";
 import { idempotencyKeys } from "#/lib/db/schema";
 
@@ -6,17 +6,30 @@ import { idempotencyKeys } from "#/lib/db/schema";
  * Helpers de idempotência (ADR-0003). Antes de chamar um serviço externo (Asaas/NFCom),
  * o job adquire a key determinística. Estados:
  * - in_progress (sem external_id): escrita em curso; outro acquire retorna in_progress
- *   (caller decide retry/fail), NÃO re-emite.
+ *   com `acquired=false` (caller decide retry/fail), NÃO re-emite.
  * - resolved (com external_id): já feita; acquire retorna o external_id para reuso.
+ *
+ * `acquireKey` é ATÔMICO: usa `INSERT ... ON CONFLICT(key) DO NOTHING` + re-read. Dois
+ * callers concorrentes na mesma key → exatamente um insere (`acquired=true`); o outro
+ * re-lê e vê `in_progress` com `acquired=false` (não adquiriu — outro é dono). Isso
+ * fecha o race TOCTOU que poderia duplicar boleto/nota (revisão C1).
  *
  * Nota sobre o "buraco pós-POST" (ADR-0003 item 4): a key local não cobre o crash
  * entre o POST e a resolução. O tratamento é por serviço (Asaas consulta por
  * externalReference; NFCom não re-emite → inspeção), decidido em SPEC/worker — não aqui.
  */
 
-export type IdempotencyAcquire =
-	| { status: "in_progress"; externalId: null }
-	| { status: "resolved"; externalId: string };
+export type IdempotencyAcquire = {
+	status: "in_progress";
+	externalId: null;
+	/** true se ESTA chamada inseriu a key (é a dona); false se já existia (outro é dono). */
+	acquired: boolean;
+} | {
+	status: "resolved";
+	externalId: string;
+	/** reuso de key já resolvida — `acquired=false` (não foi uma aquisição nova). */
+	acquired: false;
+};
 
 export interface IdempotencyKeyRow {
 	key: string;
@@ -34,27 +47,36 @@ function nowISO(): string {
 }
 
 /**
- * Adquire uma idempotency key. Se a key não existe, insere como `in_progress`.
- * Se existe e está `resolved`, retorna o external_id (caminho de reuso — não re-chama
- * o serviço). Se existe e está `in_progress`, retorna `in_progress` (caller retry/fail).
+ * Adquire uma idempotency key de forma ATÔMICA. Tenta inserir com
+ * `ON CONFLICT(key) DO NOTHING`; se a inserção acontecer (`changes===1`), esta
+ * chamada é a dona (`acquired=true`). Se a key já existia, re-lê para determinar o
+ * estado (resolved → reuso; in_progress → não adquiriu, outro é dono).
  */
 export async function acquireKey(
 	db: DB,
 	key: string,
 	target: string,
 ): Promise<IdempotencyAcquire> {
-	const existing = await getKey(db, key);
-	if (existing) {
-		if (existing.status === "resolved" && existing.externalId !== null) {
-			return { status: "resolved", externalId: existing.externalId };
-		}
-		return { status: "in_progress", externalId: null };
-	}
 	const ts = nowISO();
-	await db
+	const result = await db
 		.insert(idempotencyKeys)
-		.values({ key, target, status: "in_progress", externalId: null, createdAt: ts, updatedAt: ts });
-	return { status: "in_progress", externalId: null };
+		.values({ key, target, status: "in_progress", externalId: null, createdAt: ts, updatedAt: ts })
+		.onConflictDoNothing()
+		.returning();
+
+	// returning() no libsql/drizzle: se a inserção aconteceu, retorna a row; se
+	// onConflictDoNothing no-op, retorna [].
+	if (result.length > 0) {
+		return { status: "in_progress", externalId: null, acquired: true };
+	}
+
+	// A key já existia — re-lê para classificar (resolved vs in_progress de outro).
+	const existing = await getKey(db, key);
+	if (existing && existing.status === "resolved" && existing.externalId !== null) {
+		return { status: "resolved", externalId: existing.externalId, acquired: false };
+	}
+	// in_progress de outro caller (ou estado inesperado) — não adquiriu.
+	return { status: "in_progress", externalId: null, acquired: false };
 }
 
 /**

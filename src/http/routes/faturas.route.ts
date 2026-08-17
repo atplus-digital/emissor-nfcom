@@ -18,6 +18,8 @@ import {
 	validarEnderecoDestinatario,
 	documentoValido,
 } from "#/domain/fatura/validacao";
+import type { DefaultsFiscais } from "#/domain/fatura/defaults-fiscais";
+import { DEFAULTS_FISCAIS_PADRAO } from "#/domain/fatura/defaults-fiscais";
 import type { Fatura } from "#/domain/types";
 import type { AtacadoPort } from "#/domain/ports/atacado.port";
 import type { QueuePort } from "#/domain/ports/queue.port";
@@ -33,6 +35,13 @@ import { log } from "#/lib/logger";
 export interface FaturasRoutesDeps {
 	atacado: AtacadoPort;
 	queue: QueuePort;
+	/**
+	 * Defaults fiscais (CFOP/cClass/ICMS) vindos de `env.FISCAL_*` (ADR-0005). O domínio
+	 * não lê env (ADR-0004), então a rota os recebe injetados do composition root e
+	 * passa a `calcularFatura`. Opcional com fallback ao padrão provisório (testes de
+	 * rotas que não exercitam o cálculo podem omitir).
+	 */
+	defaultsFiscais?: DefaultsFiscais;
 }
 
 /**
@@ -129,7 +138,7 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 		}
 
 		// Passo 5: cálculo (domínio puro).
-		const { fatura, erros: errosCalc } = calcularFatura(parceiro, clientes, planos, refNorm, tipoFaturamento);
+		const { fatura, erros: errosCalc } = calcularFatura(parceiro, clientes, planos, refNorm, tipoFaturamento, deps.defaultsFiscais ?? DEFAULTS_FISCAIS_PADRAO);
 		if (errosCalc.length > 0) {
 			const { corpo, status } = erroResponse(TipoErro.VALIDACAO, errosCalc[0]?.mensagem ?? "Erro de calculo", { erros: errosCalc });
 			return c.json(corpo, status as ContentfulStatusCode);

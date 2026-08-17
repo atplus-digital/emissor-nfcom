@@ -30,7 +30,9 @@ describe("SPEC-0001 caso 5 — idempotência de boleto (consult-before-re-emit)"
 		});
 
 		const asaas = {
-			consultarBoletoPorExternalReference: mock(() => Promise.resolve(null)),
+			consultarBoletoPorExternalReference: mock(() =>
+				Promise.resolve({ idExterno: "pay_existing", linkFatura: "http://link-reuse" }),
+			),
 			criarBoleto: mock(() => Promise.reject(new Error("não deve chamar"))),
 			buscarCustomerPorDocumento: mock(() => Promise.resolve(null)),
 			criarCustomer: mock(() =>
@@ -50,7 +52,9 @@ describe("SPEC-0001 caso 5 — idempotência de boleto (consult-before-re-emit)"
 		);
 
 		expect(asaas.criarBoleto).toHaveBeenCalledTimes(0);
-		expect(asaas.consultarBoletoPorExternalReference).toHaveBeenCalledTimes(0);
+		// m3: no reuse path, re-busca o linkFatura via consultarBoletoPorExternalReference
+		// (a key só guarda externalId, não o link; sem re-busca, o link é perdido)
+		expect(asaas.consultarBoletoPorExternalReference).toHaveBeenCalledWith(`cobranca:${cobrancaId}`);
 		// o worker escreve via outbox (não chama atacado direto) — o relay entrega
 		const { drainOutbox } = await import("#/lib/db/outbox");
 		const msgs = await drainOutbox(db, 10);
@@ -58,7 +62,7 @@ describe("SPEC-0001 caso 5 — idempotência de boleto (consult-before-re-emit)"
 		expect(statusMsg?.payload).toMatchObject({
 			id: cobrancaId,
 			status: "emitida",
-			extra: expect.objectContaining({ idExterno: "pay_existing" }),
+			extra: expect.objectContaining({ idExterno: "pay_existing", linkFatura: "http://link-reuse" }),
 		});
 		expect(res.boletoOk).toBe(true);
 	});

@@ -7,10 +7,11 @@ import { faturaLease } from "#/lib/db/schema";
  * lease `fatura:{id}:emitir` ao iniciar; um novo job só reassume se o anterior for
  * detectado como morto (BullMQ stalled/failed), não por relógio.
  *
- * `acquireLease` aqui é a primitiva de insert-or-conflict: se a fatura já tem lease,
- * retorna `false` (não adquirido). A lógica de "reassume se morto" (liberar o lease de
- * um job stalled) é responsabilidade do worker, que decide quando é seguro chamar
- * `releaseLease` antes de `acquireLease` — não deste helper de baixo nível.
+ * `acquireLease` é ATÔMICA: `INSERT ... ON CONFLICT DO NOTHING` + verifica se a
+ * inserção realmente aconteceu (revisão M1). Retorna `true` apenas se ESTA chamada
+ * inseriu a row; se o lease já existia, retorna `false` (outro é dono). A lógica de
+ * "reassume se morto" (liberar o lease de um job stalled) é responsabilidade do
+ * worker, que decide quando é seguro chamar `releaseLease` antes de `acquireLease`.
  */
 
 type DB = CoordDB;
@@ -20,19 +21,17 @@ function nowISO(): string {
 }
 
 /**
- * Tenta adquirir o lease da fatura. Retorna `true` se adquirido (fatura estava livre),
- * `false` se já existe lease ativo.
+ * Tenta adquirir o lease da fatura de forma ATÔMICA. Retorna `true` se ESTA chamada
+ * inseriu a row (fatura estava livre), `false` se o lease já existia.
  */
 export async function acquireLease(db: DB, faturaId: number): Promise<boolean> {
-	// Insert-or-ignore: se já existe row com essa PK, não insere (não conflita).
-	// libsql/drizzle: onConflictDoNothing na PK.
-	const existing = await hasLease(db, faturaId);
-	if (existing) return false;
-	await db
+	const result = await db
 		.insert(faturaLease)
 		.values({ faturaId, emitindoSince: nowISO() })
-		.onConflictDoNothing();
-	return true;
+		.onConflictDoNothing()
+		.returning();
+	// returning() no libsql/drizzle: row de volta só se a inserção aconteceu.
+	return result.length > 0;
 }
 
 /**

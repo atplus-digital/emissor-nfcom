@@ -26,6 +26,7 @@ import type {
 } from "#/domain/ports/atacado.port";
 import type { Cliente, Fatura, Parceiro, Plano } from "#/domain/types";
 import type { AtacadoClient } from "./atacado.client";
+import { AtacadoError } from "./atacado.client";
 import { clienteToDomain, type ClienteExterno } from "./translators/cliente";
 import {
 	cobrancaToCreate,
@@ -51,9 +52,16 @@ const COL = {
 export class AtacadoRepository implements AtacadoPort {
 	constructor(private readonly client: AtacadoClient) {}
 
-	async buscarParceiroPorId(parceiroId: number): Promise<Parceiro> {
-		const e = await this.client.get(COL.parceiros, { filterByTk: parceiroId });
-		return parceiroToDomain(e as ParceiroExterno);
+	async buscarParceiroPorId(parceiroId: number): Promise<Parceiro | null> {
+		try {
+			const e = await this.client.get(COL.parceiros, { filterByTk: parceiroId });
+			return parceiroToDomain(e as ParceiroExterno);
+		} catch (err) {
+			// 404 = registro não encontrado → null (a rota vira 422, SPEC-0002 caso 1).
+			// Outros erros (5xx, etc.) propagam — são retryable/fatal no worker.
+			if (err instanceof AtacadoError && err.statusCode === 404) return null;
+			throw err;
+		}
 	}
 
 	async buscarClientesAtivosPorParceiro(parceiroId: number): Promise<Cliente[]> {

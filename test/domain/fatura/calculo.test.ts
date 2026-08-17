@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { calcularFatura } from "#/domain/fatura/calculo";
+import type { DefaultsFiscais } from "#/domain/fatura/defaults-fiscais";
 import type { Cliente, Parceiro, Plano } from "#/domain/types";
 
 const parceiro: Parceiro = {
@@ -7,6 +8,8 @@ const parceiro: Parceiro = {
 	diaVencimento: 10, endereco: { logradouro: "R", numero: "1", bairro: "C", cep: "80000000", cidade: "C", uf: "PR" },
 };
 const planos: Plano[] = [{ id: 1, descricao: "A", preco: 1000 }];
+
+const defaults: DefaultsFiscais = { cfop: "6102", cclass: "XXXX", aliqIcms: 0 };
 
 function cliente(id: number, nome: string, linhas: { planoId: number; unitario: number; quantidade: number }[]): Cliente {
 	return {
@@ -19,7 +22,7 @@ function cliente(id: number, nome: string, linhas: { planoId: number; unitario: 
 describe("calcularFatura (SPEC-0002)", () => {
 	it("total da fatura em centavos = soma das cobranças (caso 11: consistência)", () => {
 		const clientes = [cliente(10, "João", [{ planoId: 1, unitario: 1000, quantidade: 2 }])];
-		const { fatura, erros } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro");
+		const { fatura, erros } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro", defaults);
 		expect(erros).toEqual([]);
 		expect(fatura.valorTotal).toBe(2000);
 		const somaCobrancas = fatura.cobrancas.reduce((a, c) => a + c.valorTotal, 0);
@@ -33,7 +36,7 @@ describe("calcularFatura (SPEC-0002)", () => {
 				{ planoId: 999, unitario: 5000, quantidade: 1 }, // plano não existe → descarta
 			]),
 		];
-		const { fatura, erros } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro");
+		const { fatura, erros } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro", defaults);
 		expect(erros).toEqual([]);
 		expect(fatura.valorTotal).toBe(1000); // só a linha válida
 	});
@@ -45,7 +48,7 @@ describe("calcularFatura (SPEC-0002)", () => {
 				{ planoId: 1, unitario: 0, quantidade: 2 }, // preço zero → descarta
 			]),
 		];
-		const { fatura } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro");
+		const { fatura } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro", defaults);
 		expect(fatura.valorTotal).toBe(1000);
 	});
 
@@ -54,7 +57,7 @@ describe("calcularFatura (SPEC-0002)", () => {
 			cliente(10, "João", [{ planoId: 1, unitario: 1000, quantidade: 1 }]),
 			cliente(11, "Maria", [{ planoId: 999, unitario: 1000, quantidade: 1 }]), // todas linhas descartadas
 		];
-		const { fatura, erros } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro");
+		const { fatura, erros } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro", defaults);
 		expect(erros).toEqual([]);
 		expect(fatura.valorTotal).toBe(1000); // só João
 		// Maria não gera nota (em via-parceiro seria 1 nota só, de João)
@@ -63,14 +66,26 @@ describe("calcularFatura (SPEC-0002)", () => {
 
 	it("erro quando TODOS os clientes ficam sem linhas válidas (caso 2/9)", () => {
 		const clientes = [cliente(10, "João", [{ planoId: 999, unitario: 1000, quantidade: 1 }])];
-		const { erros } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro");
+		const { erros } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro", defaults);
 		expect(erros.length).toBeGreaterThanOrEqual(1);
 	});
 
 	it("normaliza dataReferencia para o 1º dia e calcula vencimento no mês seguinte", () => {
 		const clientes = [cliente(10, "João", [{ planoId: 1, unitario: 1000, quantidade: 1 }])];
-		const { fatura } = calcularFatura(parceiro, clientes, planos, "2026-08-15", "parceiro");
+		const { fatura } = calcularFatura(parceiro, clientes, planos, "2026-08-15", "parceiro", defaults);
 		expect(fatura.dataReferencia).toBe("2026-08-01");
 		expect(fatura.dataVencimento).toBe("2026-09-10");
+	});
+
+	it("usa os defaultsFiscais passados (não hardcoded) nos itens (M3)", () => {
+		const clientes = [cliente(10, "João", [{ planoId: 1, unitario: 1000, quantidade: 1 }])];
+		const d: DefaultsFiscais = { cfop: "5102", cclass: "CCLASS_X", aliqIcms: 0.17 };
+		const { fatura } = calcularFatura(parceiro, clientes, planos, "2026-08-01", "parceiro", d);
+		const item = fatura.cobrancas[0]?.notas[0]?.itens[0];
+		expect(item?.cfop).toBe("5102");
+		expect(item?.cclass).toBe("CCLASS_X");
+		expect(item?.aliqIcms).toBe(0.17);
+		expect(item?.incideAliquota).toBe(true);
+		expect(item?.icms).toBe(Math.round(1000 * 0.17));
 	});
 });

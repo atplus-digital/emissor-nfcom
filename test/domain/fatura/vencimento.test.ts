@@ -25,4 +25,24 @@ describe("calcularDataVencimento", () => {
 	it("faz rollover de ano com dia do parceiro customizado", () => {
 		expect(calcularDataVencimento("2026-12-15", 5)).toBe("2027-01-05");
 	});
+
+	it("clampa dia 31 para fevereiro não-bissexto (C2): ref 2026-01 → 2026-02-28", () => {
+		expect(calcularDataVencimento("2026-01-15", 31)).toBe("2026-02-28");
+	});
+
+	it("clampa dia 31 para fevereiro bissexto (C2): ref 2024-01 → 2024-02-29", () => {
+		expect(calcularDataVencimento("2024-01-15", 31)).toBe("2024-02-29");
+	});
+
+	it("clampa dia 31 para mês de 30 dias (C2): ref 2026-03 → 2026-04-30", () => {
+		expect(calcularDataVencimento("2026-03-15", 31)).toBe("2026-04-30");
+	});
+
+	it("não clampa dia 31 em mês de 31 dias (C2): ref 2026-07 → 2026-08-31", () => {
+		expect(calcularDataVencimento("2026-07-15", 31)).toBe("2026-08-31");
+	});
+
+	it("clampa dia 30 em fevereiro (C2): ref 2026-01, dia 30 → 2026-02-28", () => {
+		expect(calcularDataVencimento("2026-01-15", 30)).toBe("2026-02-28");
+	});
 });
