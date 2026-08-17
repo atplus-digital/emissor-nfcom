@@ -1,5 +1,5 @@
 ---
-status: draft
+status: accepted
 date: 2026-08-14
 builds-on: [ADR-0003, ADR-0004, ADR-0005]
 implemented-by: []
@@ -187,14 +187,15 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
 
 ## Questões em aberto
 
-- [ ] `via-parceiro` vs `cofaturamento`: **decidido manter separados** como valores de
-      enum distintos — o negócio ainda não definiu a divergência, mas os tipos não
-      devem ser fundidos. Cardinalidade idêntica hoje (caso 12); quando o negócio
-      definir a divergência (ex.: `cofaturamento` particiona o total entre parceiro e
-      AT+, ou gera nota adicional ao parceiro), atualizar a tabela de Garantias.
-- [ ] Fluxo de **descarte/cancelamento de fatura** (necessário para o caso 5: fatura em
-      `erro` exige descarte antes de re-preparar): fora do primeiro ciclo — **SPEC-0003**
-      (reservada no BACKLOG), junto com o cancelamento de NFCom da SPEC-0001.
+Nenhuma — os itens que eram abertos viraram decisões de escopo:
+
+- `via-parceiro` vs `cofaturamento`: **mantidos separados** como valores de enum
+  distintos (o negócio ainda não definiu a divergência, mas os tipos não devem ser
+  fundidos). Cardinalidade idêntica hoje (caso 12); quando o negócio definir a
+  divergência, atualizar a tabela de Garantias.
+- Fluxo de **descarte/cancelamento de fatura** (caso 5: fatura em `erro` exige descarte
+  antes de re-preparar): fora do primeiro ciclo — **SPEC-0003** (reservada no BACKLOG),
+  junto com o cancelamento de NFCom da SPEC-0001.
 
 ## Decisões fechadas nesta spec
 
@@ -254,7 +255,7 @@ mascarado) **não saem do módulo** — o tradutor converte na fronteira (ADR-00
 ```bash
 bun run typecheck                 # exit 0
 # cada caso de borda tem teste nomeado que o exercita:
-bun run test test/preparation      # casos 1-14 — N/N verdes
+bun run test test/preparation      # casos 1-14 — 0 fail
 # a cardinalidade por TipoFaturamento é exercida por tipo:
 # (um teste por tipo: parceiro/via-parceiro/cofaturamento/cliente-final)
 # valores monetários no domínio são centavos inteiros (ADR-0004) — número em unidade
@@ -300,5 +301,8 @@ ausência do `src/` antes da implementação não invalida o `status: draft`.
 ## Verificação
 
 ```text
-(preencher no fechamento)
+Fechamento (2026-08-17): implementado nas Fases 2/5 (commits c97d7e1, 29f6619,
+0a6f55a). typecheck exit 0; `bun run test test/preparation/` verdes (casos 1-14);
+greps da DoD acima passam; revisão corrigiu clamp de vencimento (fev/ano bissexto)
+e defaults fiscais via env injetados na rota (DefaultsFiscais).
 ```

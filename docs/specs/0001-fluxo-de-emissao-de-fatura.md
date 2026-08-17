@@ -1,5 +1,5 @@
 ---
-status: draft
+status: accepted
 date: 2026-08-13
 builds-on: [ADR-0001, ADR-0002, ADR-0003, ADR-0004, ADR-0005]
 # A fatura é preparada (cálculo + árvore por tipo de faturamento) pela SPEC-0002.
@@ -197,11 +197,12 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 
 ## Questões em aberto
 
-- [ ] Cancelamento/substituição de NFCom (até 120h) é um fluxo separado, **fora deste
-      primeiro ciclo** (só emissão). Será modelado em **SPEC-0003** (reservada no
-      BACKLOG). Confirmado: o gateway expõe `DELETE /api/cancela?chave=&protocolo=`
-      (retorna `xmlcanc`/`chavesub` na `NFCom`) — o endpoint existe, é de cancelamento
-      (query params, não "evento" com body).
+Nenhuma — os itens que eram abertos viraram decisões de escopo:
+
+- Cancelamento/substituição de NFCom (até 120h) é um fluxo separado, **fora deste
+  primeiro ciclo** (só emissão), modelado em **SPEC-0003** (reservada no BACKLOG).
+  Confirmado: o gateway expõe `DELETE /api/cancela?chave=&protocolo=` (retorna
+  `xmlcanc`/`chavesub` na `NFCom`).
 
 ## Decisões fechadas nesta spec
 
@@ -259,8 +260,8 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 ```bash
 bun run typecheck                 # exit 0
 # cada caso de borda tem teste nomeado que o exercita:
-bun run test test/emission        # casos 1-11, 15-18 (emissão) — N/N verdes
-bun run test test/webhook         # casos 12,13,14 (webhook) — N/N verdes
+bun run test test/emission        # casos 1-11, 15-18 (emissão) — 0 fail
+bun run test test/webhook         # casos 12,13,14 (webhook) — 0 fail
 # job de emissão enfileira (não executa síncrono) — ADR-0002
 test -d src/http && (grep -rn "queue.add\|\.add(" src/http/ | grep -i emit | wc -l | grep -qv '^0$' || exit 1)
 # nenhum boleto/nota é emitido sem consulta à idempotency key — ADR-0003
@@ -292,5 +293,10 @@ não invalida o `status: draft`.
 ## Verificação
 
 ```text
-(preencher no fechamento)
+Fechamento (2026-08-17): implementado nas Fases 1-6 (commits fc5c8a0..eef3da0).
+typecheck exit 0; `bun run test test/emission/ test/webhook/` verdes (casos 1-18);
+greps da DoD acima passam; revisão de código (4 revisores opus) — CRITICAL/MAJOR
+corrigidos no commit 0a6f55a (idempotência atômica, clamp vencimento, defaults
+fiscais, caso6×15, linkFatura). Consolidação via FlowProducer parent-callback;
+limitação anotada: notasOk aproximado (grandchildren) — refinamento futuro.
 ```

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-08-17
 builds-on: [ADR-0003, ADR-0005]
 superseded-by: null

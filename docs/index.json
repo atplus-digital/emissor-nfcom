@@ -4,7 +4,7 @@
     "path": "docs/adr/0001-integracao-sefaz-via-gateway-saas.md",
     "layer": "adr",
     "title": "Integração com a SEFAZ via gateway SaaS em vez de motor fiscal próprio",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [],
     "superseded-by": null,
     "implemented-by": []
@@ -14,7 +14,7 @@
     "path": "docs/adr/0002-orquestracao-assincrona-bullmq.md",
     "layer": "adr",
     "title": "Orquestração de emissão assíncrona via BullMQ + Redis",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [
       "ADR-0001"
     ],
@@ -26,7 +26,7 @@
     "path": "docs/adr/0003-estado-local-sqlite-idempotencia-outbox.md",
     "layer": "adr",
     "title": "Estado local SQLite para idempotência e outbox",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [
       "ADR-0002"
     ],
@@ -38,7 +38,7 @@
     "path": "docs/adr/0004-limites-de-modulo-anti-corruption-layers.md",
     "layer": "adr",
     "title": "Limites de módulo como anti-corruption layers para cada integração externa",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [
       "ADR-0001",
       "ADR-0003"
@@ -51,7 +51,7 @@
     "path": "docs/adr/0005-stack-tecnologica.md",
     "layer": "adr",
     "title": "Stack tecnológica: Bun + Hono + Drizzle + Zod 4",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [
       "ADR-0001",
       "ADR-0002",
@@ -65,7 +65,7 @@
     "path": "docs/adr/0006-tipos-de-crm-gerados-por-script.md",
     "layer": "adr",
     "title": "Tipos de CRM/Atacado/IXC sempre gerados por script, nunca escritos à mão",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [
       "ADR-0004"
     ],
@@ -77,7 +77,7 @@
     "path": "docs/adr/0007-estrutura-de-pastas-camadas.md",
     "layer": "adr",
     "title": "Estrutura de pastas: camadas com domínio no centro",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [
       "ADR-0004",
       "ADR-0002",
@@ -91,7 +91,7 @@
     "path": "docs/adr/0008-logging-estruturado-pino.md",
     "layer": "adr",
     "title": "Logging estruturado com pino: correlação por AsyncLocalStorage e redação explícita",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [
       "ADR-0005",
       "ADR-0007",
@@ -105,7 +105,7 @@
     "path": "docs/adr/0009-migrations-drizzle-geradas-sem-edicao-manual.md",
     "layer": "adr",
     "title": "Migrations de BD são geradas pelo drizzle-kit, nunca escritas à mão",
-    "status": "proposed",
+    "status": "accepted",
     "builds-on": [
       "ADR-0003",
       "ADR-0005"
@@ -118,7 +118,7 @@
     "path": "docs/specs/0001-fluxo-de-emissao-de-fatura.md",
     "layer": "specs",
     "title": "Fluxo de emissão de fatura (fatura → cobranças → notas)",
-    "status": "draft",
+    "status": "accepted",
     "builds-on": [
       "ADR-0001",
       "ADR-0002",
@@ -134,7 +134,7 @@
     "path": "docs/specs/0002-preparacao-de-fatura.md",
     "layer": "specs",
     "title": "Preparação de fatura (cálculo + persistência da árvore por tipo de faturamento)",
-    "status": "draft",
+    "status": "accepted",
     "builds-on": [
       "ADR-0003",
       "ADR-0004",
