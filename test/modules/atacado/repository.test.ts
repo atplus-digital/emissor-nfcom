@@ -1,0 +1,284 @@
+import { describe, expect, it, mock } from "bun:test";
+import type { AtacadoClient } from "#/modules/atacado/atacado.client";
+import { AtacadoRepository } from "#/modules/atacado/atacado.repository";
+
+/** Constrói um mock do AtacadoClient com spies registrando as chamadas. */
+function mockClient(
+	impls: Partial<Record<keyof AtacadoClient, (...args: any[]) => any>> = {},
+): {
+	client: AtacadoClient;
+	calls: Record<string, unknown[][]>;
+} {
+	const calls: Record<string, unknown[][]> = {};
+	const make = (name: keyof AtacadoClient) =>
+		mock((...args: unknown[]) => {
+			(calls[name] ??= []).push(args);
+			return impls[name]?.(...args);
+		});
+	const client = {
+		get: make("get"),
+		list: make("list"),
+		create: make("create"),
+		destroy: make("destroy"),
+		update: make("update"),
+	} as unknown as AtacadoClient;
+	return { client, calls };
+}
+
+describe("AtacadoRepository > leitura", () => {
+	it("buscarParceiroPorId: GET t_parceiros:get por filterByTk + appends", async () => {
+		const { client, calls } = mockClient({
+			get: async () => ({
+				id: 42,
+				f_razao_social: "P Ltda",
+				f_cnpj: "12.345.678/0001-99",
+				f_email_faturamento: "p@p.com",
+				f_data_vencimento: 10,
+				f_endereco: "r",
+				f_numero: "1",
+				f_bairro: "b",
+				f_cep: "c",
+				f_cidade: "ct",
+				f_uf: "PR",
+			}),
+		});
+		const repo = new AtacadoRepository(client);
+		const p = await repo.buscarParceiroPorId(42);
+		expect(p.id).toBe(42);
+		expect(p.cnpj).toBe("12345678000199");
+		expect(calls.get[0]).toMatchObject([expect.any(String), expect.objectContaining({ filterByTk: 42 })]);
+	});
+
+	it("buscarClientesAtivosPorParceiro: list t_clientes por f_fk_parceiro + appends linhas_fixas", async () => {
+		const { client, calls } = mockClient({
+			list: async () => [
+				{
+					id: 7,
+					f_nome_razao: "C",
+					f_cpf_cnpj: "111.222.333-44",
+					f_email: "",
+					f_endereco: "r",
+					f_numero: "1",
+					f_bairro: "b",
+					f_cep: "c",
+					f_cidade: "ct",
+					f_uf: "PR",
+					f_linhas_fixas: [],
+				},
+			],
+		});
+		const repo = new AtacadoRepository(client);
+		const cs = await repo.buscarClientesAtivosPorParceiro(42);
+		expect(cs).toHaveLength(1);
+		expect(cs[0].cpfcnpj).toBe("11122233344");
+		expect(calls.list[0]).toMatchObject([expect.any(String), expect.objectContaining({})]);
+	});
+});
+
+describe("AtacadoRepository > criação da árvore", () => {
+	it("criarFatura: POST :create e retorna {id}", async () => {
+		const { client, calls } = mockClient({
+			create: async () => ({ id: 101 }),
+		});
+		const repo = new AtacadoRepository(client);
+		const r = await repo.criarFatura({
+			parceiroId: 42,
+			dataReferencia: "2026-08-01",
+			dataVencimento: "2026-09-10",
+			valorTotal: 12345,
+			tipoFaturamento: "cofaturamento",
+			status: "a-emitir",
+		});
+		expect(r).toEqual({ id: 101 });
+		expect(calls.create[0][0]).toContain("nfcom-faturas");
+		expect(calls.create[0][1]).toMatchObject({ f_status: "a-emitir" });
+	});
+
+	it("criarCobranca: cria na coleção correta com f_fk_fatura", async () => {
+		const { client, calls } = mockClient({
+			create: async () => ({ id: 456 }),
+		});
+		const repo = new AtacadoRepository(client);
+		const r = await repo.criarCobranca(101, {
+			valorTotal: 12345,
+			nomeDevedor: "X",
+			documentoDevedor: "12345678000199",
+			emailDevedor: "x@x.com",
+			status: "a-emitir",
+			dataVencimento: "2026-09-10",
+		});
+		expect(r).toEqual({ id: 456 });
+		expect(calls.create[0][1]).toMatchObject({ f_fk_fatura: 101, f_valor_total: 123.45 });
+	});
+
+	it("criarNota: cria com f_fk_cobranca", async () => {
+		const { client, calls } = mockClient({
+			create: async () => ({ id: 7 }),
+		});
+		const repo = new AtacadoRepository(client);
+		const r = await repo.criarNota(456, {
+			nome: "C",
+			cpfcnpj: "11122233344",
+			endereco: { logradouro: "r", numero: "1", bairro: "b", cep: "c", cidade: "ct", uf: "PR" },
+			uf: "PR",
+			cidade: "ct",
+			statusInterno: "a-emitir",
+			total: 12345,
+		});
+		expect(r).toEqual({ id: 7 });
+		expect(calls.create[0][1]).toMatchObject({ f_fk_cobranca: 456 });
+	});
+
+	it("criarItem: cria na t_nfcom_itens", async () => {
+		const { client, calls } = mockClient({
+			create: async () => ({ id: 1 }),
+		});
+		const repo = new AtacadoRepository(client);
+		await repo.criarItem(7, {
+			descricao: "S",
+			cfop: "6102",
+			cclass: "0001",
+			quantidade: 1,
+			unitario: 9990,
+			total: 9990,
+			aliqIcms: 0.18,
+			bcIcms: 9990,
+			icms: 1798,
+			incideAliquota: true,
+		});
+		expect(calls.create[0][1]).toMatchObject({ f_fk_nota_fiscal: 7, f_cfop: "6102" });
+	});
+});
+
+describe("AtacadoRepository > removerArvore", () => {
+	it("ordem: itens → notas → cobranças (não remove a fatura)", async () => {
+		const calls: string[] = [];
+		const { client } = mockClient({
+			list: async () => [
+				{
+					id: 1,
+					f_cobrancas: [
+						{
+							id: 50,
+							f_notas_fiscais: [{ id: 11, f_nota_itens: [{ id: 21 }] }],
+						},
+					],
+				},
+			],
+			destroy: async (_col: string, id: number) => {
+				calls.push(`${_col}:${id}`);
+			},
+		});
+		const repo = new AtacadoRepository(client);
+		await repo.removerArvore(1);
+		// espera que destrua itens antes de notas, notas antes de cobranças
+		const itemIdx = calls.findIndex((c) => c.startsWith("nfcom-itens"));
+		const notaIdx = calls.findIndex((c) => c.startsWith("nfcom-notas"));
+		const cobIdx = calls.findIndex((c) => c.startsWith("nfcom-cobrancas"));
+		expect(itemIdx).toBeGreaterThanOrEqual(0);
+		expect(itemIdx).toBeLessThan(notaIdx);
+		expect(notaIdx).toBeLessThan(cobIdx);
+		// fatura NÃO é destruída
+		expect(calls.find((c) => c.startsWith("nfcom-faturas"))).toBeUndefined();
+	});
+});
+
+describe("AtacadoRepository > atualização de estado", () => {
+	it("atualizarStatusFatura: update na t_nfcom_faturas", async () => {
+		const { client, calls } = mockClient({
+			update: async () => undefined,
+		});
+		const repo = new AtacadoRepository(client);
+		await repo.atualizarStatusFatura(101, "emitindo");
+		expect(calls.update[0][0]).toContain("nfcom-faturas");
+		expect(calls.update[0]).toMatchObject([expect.any(String), 101, { f_status: "emitindo" }]);
+	});
+
+	it("atualizarStatusCobranca: update com extras (idExterno, link, dataEmissao)", async () => {
+		const { client, calls } = mockClient({
+			update: async () => undefined,
+		});
+		const repo = new AtacadoRepository(client);
+		await repo.atualizarStatusCobranca(456, "emitida", {
+			idExterno: "ext_1",
+			linkFatura: "http://l",
+			dataEmissao: "2026-08-17",
+		});
+		expect(calls.update[0]).toMatchObject([
+			expect.any(String),
+			456,
+			{ f_status: "emitida", f_id_externo: "ext_1", f_link_fatura: "http://l", f_data_emissao: "2026-08-17" },
+		]);
+	});
+
+	it("atualizarStatusNota: update com chave/protocolo/etc", async () => {
+		const { client, calls } = mockClient({
+			update: async () => undefined,
+		});
+		const repo = new AtacadoRepository(client);
+		await repo.atualizarStatusNota(7, {
+			statusInterno: "emitida",
+			situacao: "autorizada",
+			chave: "chave44",
+			protocolo: "prot",
+			numero: 123,
+			serie: 1,
+		});
+		expect(calls.update[0]).toMatchObject([
+			expect.any(String),
+			7,
+			{ f_status_interno: "emitida", f_situacao: "autorizada", f_chave: "chave44" },
+		]);
+	});
+
+	it("registrarErro: create na t_nfcom_erros", async () => {
+		const { client, calls } = mockClient({
+			create: async () => ({ id: 1 }),
+		});
+		const repo = new AtacadoRepository(client);
+		await repo.registrarErro({
+			cobrancaId: 456,
+			erro: "Timeout NFCom",
+			mensagem: "timeout",
+			statusCode: "504",
+		});
+		expect(calls.create[0][0]).toContain("nfcom-erros");
+		expect(calls.create[0][1]).toMatchObject({
+			f_fk_cobranca: 456,
+			f_erro: "Timeout NFCom",
+			f_mensagem: "timeout",
+			f_status_code: "504",
+		});
+	});
+});
+
+describe("AtacadoRepository > buscarFaturaPorChave", () => {
+	it("retorna Fatura quando encontra (com cobranças/notas/itens)", async () => {
+		const { client } = mockClient({
+			list: async () => [
+				{
+					id: 101,
+					f_fk_parceiro: 42,
+					f_data_referencia: "2026-08-01",
+					f_data_vencimento: "2026-09-10",
+					f_valor_total: 123.45,
+					f_tipo_de_faturamento: "cofaturamento",
+					f_status: "a-emitir",
+					f_cobrancas: [],
+				},
+			],
+		});
+		const repo = new AtacadoRepository(client);
+		const f = await repo.buscarFaturaPorChave(42, "2026-08-01");
+		expect(f).not.toBeNull();
+		expect(f!.id).toBe(101);
+		expect(f!.valorTotal).toBe(12345);
+	});
+
+	it("retorna null quando não encontra", async () => {
+		const { client } = mockClient({ list: async () => [] });
+		const repo = new AtacadoRepository(client);
+		const f = await repo.buscarFaturaPorChave(42, "2026-08-01");
+		expect(f).toBeNull();
+	});
+});
