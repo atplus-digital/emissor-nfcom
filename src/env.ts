@@ -42,6 +42,9 @@ const _env = createEnv({
 		FISCAL_CFOP_DEFAULT: z.string().default("6102"),
 		FISCAL_CCLASS_DEFAULT: z.string().min(1),
 		FISCAL_ICMS_ALIQUOTA: z.coerce.number().min(0).max(1).default(0),
+
+		// Logging (ADR-0008): nível default `info`, habilitável por env.
+		LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
 	},
 
 	/**
