@@ -50,6 +50,27 @@ envelope canônico, serializado por Hono (ADR-0005):
   (`YYYY-MM-DD`); timestamps de eventos (webhook, outbox) são ISO 8601 UTC no wire e
   convertidos ao fuso do domínio no uso.
 
+## Migrations Drizzle (ADR-0009)
+
+Migrations são **sempre geradas** via `bunx drizzle-kit generate` a partir de
+`src/lib/db/schema.ts` — nunca escritas/editadas à mão (ADR-0009). A regra abaixo é
+**processo de PR**, não auto-validável por inspeção de arquivo.
+
+- **Nomear AO GERAR**: o drizzle-kit atribui um nome aleatório (ex.: `0000_nervous_dexter_bennett`).
+  **Renomeie imediatamente** para um nome descritivo do que a migration introduz,
+  antes de commitá-la — formato `<seq>_<slug_descritivo>` (ex.:
+  `0000_init_coordination_schema`, `0001_add_nfcom_erros_index`). O slug descreve a
+  mudança de schema, não o autor/hora.
+- **Consistência do `meta/`**: ao renomear, atualize **junto** o `tag` em
+  `drizzle/meta/_journal.json` e qualquer referência ao nome em `drizzle/meta/`. Não
+  altere hashes internos (`id`/`prevId` do snapshot) — só o rótulo `tag`. Valide com
+  `bunx drizzle-kit generate` ("No schema changes") e `bunx drizzle-kit migrate` (aplica
+  limpo num DB temporário).
+- **Nunca editar SQL gerado**: o conteúdo de `drizzle/*.sql` é saída de máquina. Se o SQL
+  estiver errado, corrija `src/lib/db/schema.ts` e regenere. Após aplicada em produção,
+  uma migration **nunca** é editada — gera-se uma corretiva.
+- **Revisão no PR**: o SQL gerado é revisado no PR (validação, não reescrita).
+
 ## Acesso a dados
 
 - **CRM Atacado** é a fonte de domínio (faturas, cobranças, notas). O app lê e escreve
