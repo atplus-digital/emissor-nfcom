@@ -112,15 +112,27 @@ Concretamente:
    stalled/failed), não por timer de relógio. As idempotency keys filhas
    (`cobranca:{id}:boleto`, `nfcom:{id}:emitir`) garantem que, ao reassumir, cobranças/notas
    já emitidas são puladas — sem duplicação.
-4. **Referência própria nos serviços externos (dedup no buraco pós-POST)**: a
-   idempotency key local não cobre o crash **entre** o POST ao serviço externo e a
-   resolução da key (a escrita aconteceu no mundo, mas o estado local não sabe). Para
-   fechar esse buraco, toda escrita carrega uma **referência própria determinística**
-   (`externalReference`): `cobranca:{id}` no boleto Asaas, `nfcom:{id}` na emissão do
-   gateway NFCom. No retry pós-crash, o job **consulta o serviço pela referência antes
-   de re-emitir**: se a consulta encontra a escrita anterior, resolve a key com o
-   retorno dela; só re-emite se a consulta não encontrar nada. Correlação a posteriori
-   que é consultada **antes** de agir — não dedup a posteriori (SPEC-0001 casos 5/15).
+4. **Dedup no buraco pós-POST (crash entre POST e resolução da key)**: a idempotency
+   key local não cobre o crash **entre** o POST ao serviço externo e a resolução da key
+   (a escrita aconteceu no mundo, mas o estado local não sabe). O tratamento é
+   **diferente por serviço**, conforme o que o provedor oferece:
+   - **Asaas (boleto)**: o POST leva uma **referência própria determinística**
+     (`externalReference = cobranca:{id}`) e a API do Asaas permite consultar pela
+     referência. No retry pós-crash, o job **consulta o Asaas pela referência antes de
+     re-emitir**: se encontra a cobrança, resolve a key com o retorno; só re-emite se a
+     consulta não encontra nada. Correlação consultada **antes** de agir (SPEC-0001
+     caso 5).
+   - **NFCom (nota)**: o gateway **não aceita** referência própria (o schema
+     `ApiNFComEmitir` é `additionalProperties: false`) e **não expõe** consulta por
+     referência — só por `chave` (que o app não tem nesse ponto do crash) ou por
+     `cpfcnpj`+janela de data em `/api/lista` (heurística não determinística). Para
+     garantir **zero auto-duplicação**, o retry **não re-emite** quando a key da nota
+     está em-progresso e não resolvida (job stalled/órfão): o job marca a nota como
+     erro (suspeita de emissão), registra em `t_nfcom_erros` e deixa para inspeção
+     manual. O operador consulta `/api/lista` por `cpfcnpj`+data: se acha a nota
+     AUTORIZADA, resolve a key com a `chave` retornada; se não acha, re-emite
+     manualmente. **Não há auto-recuperação nesse buraco estreito** — prefere
+     intervenção manual a duplicar nota (SPEC-0001 caso 15).
 
 ## Consequências
 

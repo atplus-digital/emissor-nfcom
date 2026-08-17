@@ -18,8 +18,11 @@ O app integra três sistemas externos com contratos distintos e instáveis:
   `f_c8flsp9105w`, monetários como string com vírgula, paginação fake `pageSize: 9999`).
 - **Asaas**: API v3, header `access_token`, resposta com `errors[]`, cobranças sempre
   `billingType: BOLETO`.
-- **NFCom** (`api.nfcom.com.br`): auth `login`/`senha`, situação em lowercase
-  (`autorizada`/`cancelada`/`rejeitada`/`processando`), campos snake/mistos.
+- **NFCom** (`api.nfcom.com.br`, [swagger](https://api.nfcom.com.br/swagger/index.html)):
+  auth `login`/`senha` (`POST /api/auth`, bearer TTL 12h), `situacao` como string
+  (uppercase no swagger — `AUTORIZADA`/`CANCELADA` confirmados; `PROCESSANDO`/
+  `REJEITADA` TBC em runtime) — a ACL **normaliza case** ao traduzir para o domínio,
+  campos snake/mistos.
 
 Sem uma fronteira clara, esses contratos tendem a vazar para o domínio: tipos do provedor
 NFCom circulam fora do módulo, repositórios expõem `Record<string, unknown>` e

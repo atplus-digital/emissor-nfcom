@@ -51,14 +51,17 @@ Accepted` com o id do job e a URL de consulta de status.
    (ADR-0004).
    a. Verifica a idempotency key `nfcom:{id}:emitir`. Se resolvida (nota já emitida),
    reutiliza chave/protocolo e pula.
-   b. Autentica no gateway (token cache, TTL 2h) e `POST /api/emitir` com o payload
-   (destinatário, itens, CFOP/cClass) incluindo uma **referência própria**
-   (`externalReference = nfcom:{id}`). No retry após crash entre o POST e a resolução da
-   key, o job **consulta o gateway pela referência** antes de re-emitir — mesma
-   correlação a posteriori do boleto, só que consultada antes (decisão ADR-0003);
-   re-emitir sem consultar é proibido.
+   b. Autentica no gateway (token cache, TTL 12h) e `POST /api/emitir` com o payload
+   (destinatário, itens, CFOP/cClass). O schema `ApiNFComEmitir` é `additionalProperties:
+   false` — **não há campo de referência própria** na emissão NFCom (ao contrário do
+   boleto no Asaas). No retry após crash entre o POST e a resolução da key, o job
+   **não re-emite** (zero auto-duplicação): marca a nota como erro (suspeita de
+   emissão), registra em `t_nfcom_erros` e deixa inspeção manual — o operador consulta
+   `/api/lista` por `cpfcnpj`+data para resolver a key ou confirmar não-emissão (decisão
+   ADR-0003 item 4); re-emitir automaticamente nesse estado é proibido.
    c. Mapeia a resposta para os dois campos da nota: `f_situacao` espelha a situação
-   do gateway (`autorizada`/`cancelada`/`rejeitada`/`processando`) e
+   do gateway (string; `AUTORIZADA`/`CANCELADA` confirmados no swagger em uppercase;
+   `PROCESSANDO`/`REJEITADA` TBC em runtime — a ACL normaliza case ao traduzir) e
    `f_status_interno` é a máquina interna (`a-emitir`/`emitida`/`erro`/`cancelada`,
    conforme o enum do CRM). `autorizada` → persiste número, série, chave, protocolo,
    e as **URLs de PDF e XML** retornadas pelo gateway (armazenamento é no gateway; o
@@ -155,9 +158,12 @@ emitindo` é da SPEC-0001; o estado inicial `a-emitir` vem da preparação, SPEC
 Status possíveis da NFCom — **dois campos**:
 - `f_status_interno` (máquina interna, conforme enum do CRM): `a-emitir`, `emitida`,
   `erro`, `cancelada`.
-- `f_situacao` (espelho da situação reportada pelo gateway SEFAZ): `autorizada`,
-  `rejeitada`, `cancelada`, `processando` (`rejeitada`/`cancelada` são situações
-  reportadas pelo gateway, não transições iniciadas pelo app neste ciclo).
+- `f_situacao` (espelho da situação reportada pelo gateway SEFAZ, em lowercase no
+  domínio): `autorizada`, `rejeitada`, `cancelada`, `processando` (`rejeitada`/
+  `cancelada` são situações reportadas pelo gateway, não transições iniciadas pelo app
+  neste ciclo; a ACL normaliza o case do gateway — uppercase no swagger — ao espelhar).
+  Observação: o swagger confirma apenas `AUTORIZADA`/`CANCELADA`; `PROCESSANDO`/
+  `REJEITADA` são TBC em runtime.
 
 Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 `f_status_interno=emitida`; `rejeitada`/`cancelada` ↔ `f_situacao` correspondente +
@@ -178,13 +184,13 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 | 6   | a NFCom retorna `processando` do gateway                                                  | o job `emit-nfcom` entra em retry com backoff exponencial (BullMQ)                                        |
 | 7   | a NFCom retorna `rejeitada` ou `cancelada` do gateway                                    | marcar a nota como erro fatal (não retryar) e registrar em `t_nfcom_erros`; a fatura tende a `parcial`    |
 | 8   | o documento do devedor (CPF/CNPJ) é inválido (dígito verificador)                         | rejeitar com `422` (validação pré-emissão, pipeline de documentos ADR-0004), sem chamar o Asaas          |
-| 9   | o token do gateway expira (401) durante a emissão                                         | invalidar o cache de token, reautenticar e retryar a nota (transparente)                                  |
+| 9   | o token do gateway expira (401) durante a emissão                                         | invalidar o cache de token, reautenticar (TTL 12h) e retryar a nota (transparente)                        |
 | 10  | todos os jobs de cobrança/nota falham                                                     | a fatura vai para `erro`; nenhum efeito parcial indesejado (rollback de estado via outbox)                |
 | 11  | um job `emit-cobranca` falha mas outro da mesma fatura tem sucesso                       | a fatura vai para `parcial` (não `erro`), com a cobrança falhada elegível para retry isolado              |
 | 12  | o webhook de evento é entregue mas o cliente retorna não-2xx (ou cai)                     | retentar com backoff exponencial; após exaurir tentativas, marcar como falho (cliente reconsulta via `GET`) |
 | 13  | o cliente recebe o mesmo webhook duas vezes (retry do sistema)                           | o cliente deve dedup por `eventoId` — o sistema garante ao-menos-uma-vez, não exactly-once, na entrega   |
 | 14  | não há URL de webhook configurada (`WEBHOOK_URL` vazia)                                   | o evento não é empurrado; o estado segue disponível via `GET` (fallback) e registrado em log              |
-| 15  | o processo cai após `POST /api/emitir` no gateway, antes de resolver a idempotency key da nota | no retry, **consultar o gateway pela referência própria** (`nfcom:{id}`) antes de re-emitir; se a consulta encontra a nota, resolve a key com o retorno — sem nota duplicada |
+| 15  | o processo cai após `POST /api/emitir` no gateway, antes de resolver a idempotency key da nota | no retry, o job **não re-emite** (zero auto-duplicação): a key está em-progresso e não resolvida (job stalled/órfão), então marca a nota como erro (suspeita de emissão) + registra em `t_nfcom_erros` para inspeção manual; o operador consulta `/api/lista` por `cpfcnpj`+data — se acha a nota AUTORIZADA, resolve a key com a `chave`; se não acha, re-emite manualmente. O gateway não aceita referência própria nem consulta por referência (só por `chave`, que o app não tem nesse ponto), então a auto-recuperação é proibida em favor de não duplicar |
 | 16  | o customer já existe no Asaas com dados divergentes do CRM                               | **atualizar** o customer (nome/email/endereço) com os dados atuais do CRM — Atacado é fonte de domínio (ADR-0003); nunca usar dados desatualizados |
 | 17  | o BullMQ exaure as tentativas de um job de emissão (padrão: 5)                           | o item vai para `erro` via outbox, o job fica `failed` no BullMQ (Board) para inspeção/reprocesso; a consolidação da fatura prossegue (sem DLQ dedicada) |
 | 18  | o boleto de uma cobrança falha de forma fatal (ex.: customer inválido no Asaas)          | as notas da cobrança **ainda são emitidas** — a NFCom é obrigação fiscal do serviço, independente do pagamento; a cobrança vai a `erro` e a fatura tende a `parcial` |
@@ -193,8 +199,9 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
 
 - [ ] Cancelamento/substituição de NFCom (até 120h) é um fluxo separado, **fora deste
       primeiro ciclo** (só emissão). Será modelado em **SPEC-0003** (reservada no
-      BACKLOG), condicionado a confirmar que o gateway `api.nfcom.com.br` expõe o endpoint
-      de evento.
+      BACKLOG). Confirmado: o gateway expõe `DELETE /api/cancela?chave=&protocolo=`
+      (retorna `xmlcanc`/`chavesub` na `NFCom`) — o endpoint existe, é de cancelamento
+      (query params, não "evento" com body).
 
 ## Decisões fechadas nesta spec
 
@@ -220,10 +227,13 @@ Mapeamento gateway → nota: `autorizada` ↔ `f_situacao=autorizada` +
   notas, sucesso ou falha exausta (o BullMQ só completa um parent quando os children
   transitivos resolvem) — sem contador próprio no SQLite e sem consolidação prematura
   antes de as notas terminarem.
-- **Dedup de nota no gateway por referência própria**: todo `POST /api/emitir` leva
-  `externalReference = nfcom:{id}`; no retry pós-crash, o job consulta o gateway pela
-  referência antes de re-emitir (caso 15) — o mesmo padrão da correlação do boleto,
-  consultado antes de agir.
+- **Dedup de nota no gateway**: o gateway NFCom **não aceita** referência própria
+  (`ApiNFComEmitir` é `additionalProperties: false`) nem expõe consulta por referência
+  (só por `chave` ou `/api/lista` por `cpfcnpj`+data). Logo o padrão do boleto Asaas
+  não se aplica: no crash pós-POST, o job **não re-emite** e marca a nota como erro
+  para inspeção manual (caso 15) — zero auto-duplicação, sem auto-recuperação nesse
+  buraco. O boleto Asaas mantém a estratégia de `externalReference = cobranca:{id}`
+  com consulta antes de re-emitir (caso 5), pois o Asaas oferece ambos.
 - **Customer no Asaas: buscar por CPF/CNPJ + atualizar**: dedup por documento; dados
   divergentes do CRM são atualizados com os dados atuais (Atacado é fonte de domínio);
   cria apenas quando não existe (caso 16).
@@ -256,8 +266,8 @@ test -d src/http && (grep -rn "queue.add\|\.add(" src/http/ | grep -i emit | wc 
 # nenhum boleto/nota é emitido sem consulta à idempotency key — ADR-0003
 # (caso 5: test/emission/idempotency-boleto.test.ts; caso 2: test/emission/orphan-lease.test.ts)
 test -d src/domain/emissao && (grep -rn "payments\|api/emitir" src/domain/emissao/ | grep -v "idempotency" && exit 1 || true)
-# re-emitir nota sem antes consultar a referência é proibido — ADR-0003 item 4 (caso 15)
-test -d src/domain/emissao && (grep -rn "api/emitir" src/domain/emissao/ | grep -v "consultar-referencia\|externalReference" && exit 1 || true)
+# re-emitir nota com key em-progresso não resolvida é proibido (zero auto-duplicação) — ADR-0003 item 4 (caso 15)
+test -d src/domain/emissao && (grep -rn "api/emitir" src/domain/emissao/ | grep -v "idempotency" && exit 1 || true)
 ```
 
 Casos de borda exercitados (cada um com teste referenciado): 1, 3, 4 (validação

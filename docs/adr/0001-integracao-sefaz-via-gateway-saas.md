@@ -22,7 +22,9 @@ dentro deste repo ou se **delegamos** essa responsabilidade a um provedor extern
 
 O gateway `api.nfcom.com.br` encapsula toda a complexidade fiscal num backend de terceiros:
 consumindo-o, o app vira um cliente HTTP/JSON — sem montar XML, assinar certificado ou
-falar SOAP/mTLS.
+falar SOAP/mTLS. Contrato do provedor (OpenAPI 3.0.4, Vigo Tecnologia):
+`https://api.nfcom.com.br/swagger/index.html` (spec JSON:
+`https://api.nfcom.com.br/swagger/2.0/swagger.json`).
 
 ## Direcionadores da decisão
 
@@ -42,10 +44,13 @@ falar SOAP/mTLS.
 ### Opção 1 — Gateway SaaS (`api.nfcom.com.br`)
 
 A app vira cliente HTTP/JSON do provedor. Autenticação por `login`/`senha`
-(`POST /api/autenticar` → bearer token, TTL ~2h), emissão por `POST /api/emitir` com
+(`POST /api/auth` → bearer token, TTL **12h**), emissão por `POST /api/emitir` com
 payload JSON (destinatário, itens, CFOP/cClass). O provedor cuida do XML, assinatura,
-webservices e retorna `situacao` (`autorizada`/`cancelada`/`rejeitada`/`processando`),
-chave, protocolo, número, PDF e XML.
+webservices e retorna `situacao` (string; valores observados em runtime — `AUTORIZADA`/
+`CANCELADA` confirmados no swagger; `PROCESSANDO`/`REJEITADA` TBC em produção), chave,
+protocolo, número, PDF e XML. O schema de emissão (`ApiNFComEmitir`) é
+`additionalProperties: false` — **não há campo de referência própria**; a nota fica
+identificada só pela `chave` SEFAZ (44 dígitos) retornada pelo provedor.
 
 **Prós:**
 
@@ -123,7 +128,7 @@ webservices — apenas o contrato JSON do gateway.
 ```bash
 # O módulo nfcom é a única fronteira com a SEFAZ — nenhum outro módulo referencia
 # endpoints do provedor diretamente.
-grep -rn "api/emitir\|api/autenticar\|nfcom.com.br" src/ | grep -v "src/modules/nfcom" && exit 1
+grep -rn "api/emitir\|api/auth\|nfcom.com.br" src/ | grep -v "src/modules/nfcom" && exit 1
 # exit 1 se encontrar menção ao provedor fora do módulo nfcom.
 ```
 
@@ -132,5 +137,6 @@ grep -rn "api/emitir\|api/autenticar\|nfcom.com.br" src/ | grep -v "src/modules/
 - Avaliação de provedor alternativo (Opção 3) pode virar ADR futuro se custo/disponibilidade
   do `nfcom.com.br` se tornarem problema. A ACL (ADR-0004) isola essa troca.
 - Cancelamento/substituição de NFCom (até 120h após o último dia do mês de autorização)
-  depende de o provedor expor o endpoint — a confirmar em **SPEC-0003** (reservada no
-  BACKLOG), fora do primeiro ciclo (somente emissão, SPEC-0001).
+  é suportado pelo provedor: `DELETE /api/cancela?chave=&protocolo=` (retorna `xmlcanc` e
+  `chavesub` na `NFCom`) — modelado em **SPEC-0003** (reservada no BACKLOG), fora do
+  primeiro ciclo (somente emissão, SPEC-0001).
