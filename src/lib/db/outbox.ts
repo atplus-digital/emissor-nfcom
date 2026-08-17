@@ -1,5 +1,5 @@
 import { eq, asc, sql } from "drizzle-orm";
-import type { LibSQLDatabase } from "drizzle-orm/libsql";
+import type { CoordDB } from "#/lib/db/client";
 import { outbox } from "#/lib/db/schema";
 
 /**
@@ -25,7 +25,7 @@ export interface OutboxRow {
 	createdAt: string;
 }
 
-type DB = LibSQLDatabase<Record<string, never>>;
+type DB = CoordDB;
 
 function nowISO(): string {
 	return new Date().toISOString();

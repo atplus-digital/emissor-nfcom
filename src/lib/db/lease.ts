@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { LibSQLDatabase } from "drizzle-orm/libsql";
+import type { CoordDB } from "#/lib/db/client";
 import { faturaLease } from "#/lib/db/schema";
 
 /**
@@ -13,7 +13,7 @@ import { faturaLease } from "#/lib/db/schema";
  * `releaseLease` antes de `acquireLease` — não deste helper de baixo nível.
  */
 
-type DB = LibSQLDatabase<Record<string, never>>;
+type DB = CoordDB;
 
 function nowISO(): string {
 	return new Date().toISOString();
