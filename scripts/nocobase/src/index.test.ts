@@ -124,6 +124,10 @@ describe("handleMainFailure", () => {
 		writeCliError.mockClear();
 	});
 
+	afterEach(() => {
+		process.exitCode = 0;
+	});
+
 	it("registra stack trace em modo debug quando main falha", () => {
 		env.VITE_LOG_LEVEL = "debug";
 
