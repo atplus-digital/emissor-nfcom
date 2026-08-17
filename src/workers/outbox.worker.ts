@@ -154,14 +154,35 @@ export async function handleOutboxRelay(
  * Nota: a fila `outbox` é pollada por um repeat job (intervalo curto) que
  * dispara `outbox-relay`. O repeat job é agendado pelo composition root.
  */
-export function criarOutboxWorker(_deps: OutboxWorkerDeps): {
+export function criarOutboxWorker(deps: OutboxWorkerDeps): {
+	worker: Promise<import("bullmq").Worker>;
 	repair: () => Promise<void>;
 } {
 	// Import dinâmico: o módulo de filas puxa `#/env` no top-level (env validation).
 	// Manter a wiring BullMQ fora do escopo estático para que as funções puras
 	// (despacharOutbox/entregarLinha/drenarEEntregar) sejam testáveis sem .env.
 	// O composition root chama criarOutboxWorker (env já validado lá).
+	const workerPromise = (async () => {
+		const [{ Worker }, { getRedis }, { getQueue }, { QUEUE_NAMES, JOB_NAMES }] = await Promise.all([
+			import("bullmq"),
+			import("#/lib/redis"),
+			import("#/lib/queues"),
+			import("#/lib/queue-names"),
+		]);
+		const worker = new Worker(
+			QUEUE_NAMES.OUTBOX,
+			async (job) => {
+				if (job.name === JOB_NAMES.OUTBOX_RELAY) {
+					await handleOutboxRelay(job, deps);
+				}
+			},
+			{ connection: getRedis() },
+		);
+		return worker;
+	})();
+
 	return {
+		worker: workerPromise,
 		async repair() {
 			const { getQueue, WORKER_DEFAULTS } = await import("#/lib/queues");
 			const queue = getQueue(QUEUE_NAMES.OUTBOX);

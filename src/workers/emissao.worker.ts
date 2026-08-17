@@ -517,10 +517,163 @@ export interface EmissaoWorkers {
 	workers: import("bullmq").Worker[];
 }
 
-export function criarEmissaoWorker(_deps: EmissaoDeps): EmissaoWorkers {
-	// Wiring completo no composition root (Fase 6) — aqui só o placeholder
-	// p/ que o contrato da fábrica exista. Os handlers são exportados acima.
-	throw new Error(
-		"criarEmissaoWorker: wiring BullMQ é montado no composition root (Fase 6)",
-	);
+export function criarEmissaoWorker(deps: EmissaoDeps): EmissaoWorkers {
+	// Wiring BullMQ (Fase 6). Import dinâmico: queues/redis puxam `#/env` no
+	// top-level (env validation); as funções puras (handlers) acima são testáveis
+	// sem .env. O composition root (src/index.ts) chama esta fábrica com env já
+	// validado.
+	//
+	// Árvore do Flow (ADR-0002): emit-fatura (parent) → emit-cobranca (children)
+	// → emit-nfcom (children do emit-cobranca). O BullMQ só completa o parent
+	// quando TODOS os children transitivos resolvem (sucesso ou falha exausta).
+	// O handler do parent roda duas vezes: (1) fan-out (enfileira cobranças) e
+	// move p/ waiting-children; (2) quando os children completam, reativa e
+	// consolida o estado final da fatura via getChildrenValues — sem contador
+	// manual no SQLite (ADR-0002).
+	const wiring = (async () => {
+		const [{ Worker, FlowProducer }, { getQueue, WORKER_DEFAULTS, rateLimitFor }, { getRedis }, { QUEUE_NAMES, JOB_NAMES }] =
+			await Promise.all([
+				import("bullmq"),
+				import("#/lib/queues"),
+				import("#/lib/redis"),
+				import("#/lib/queue-names"),
+			]);
+		const connection = getRedis();
+		const flowProducer = new FlowProducer({ connection });
+		const queue = getQueue(QUEUE_NAMES.EMISSAO);
+
+		// enqueueFilho: adiciona um child ao Flow do parent. O parent é identificado
+		// pelo (parentKey = queue:jobId). Para emit-cobranca (child de emit-fatura) e
+		// emit-nfcom (child de emit-cobranca), usamos addFlow com a relação parent/child.
+		// Como os handlers chamam enqueueFilho incrementalmente (uma cobrança por vez),
+		// usamos queue.add com a opção `parent` para ligar o child ao parent em andamento.
+		const enqueueFilho = async (name: string, data: unknown): Promise<void> => {
+			const jobName = name as (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
+			// `parent` é resolvido pelo composition-root wrapper que injeta o parentKey/parentId
+			// via closure do job corrente (ver Worker handler abaixo).
+			const parent = currentParent.get("parent");
+			if (parent) {
+				await queue.add(jobName, data, { ...WORKER_DEFAULTS, parent });
+			} else {
+				await queue.add(jobName, data, WORKER_DEFAULTS);
+			}
+		};
+
+		// Contexto por-job do parent corrente (p/ enqueueFilho ligar o child). É
+		// per-thread/async-safe porque o Worker processa um job por vez por concorrência.
+		const currentParent = new Map<string, { id: string; queue: string }>();
+
+		const workerDeps: EmissaoDeps = {
+			...deps,
+			enqueueFilho,
+		};
+
+		const worker = new Worker(
+			QUEUE_NAMES.EMISSAO,
+			async (job) => {
+				const jobName = job.name as string;
+				// Parent (emit-fatura): se tem children values disponíveis (segunda
+				// passada, após children completarem) → consolida. Senão → fan-out.
+				if (jobName === JOB_NAMES.EMIT_FATURA) {
+					const childrenValues = await job.getChildrenValues<ResultadoEmitCobranca>();
+					if (childrenValues && Object.keys(childrenValues).length > 0) {
+						// Segunda passada: consolida o estado final da fatura.
+						return consolidarFaturaOuCobranca(job, childrenValues, deps);
+					}
+					// Primeira passada: fan-out. Define o parent corrente p/ enqueueFilho.
+					currentParent.set("parent", { id: job.id ?? "", queue: QUEUE_NAMES.EMISSAO });
+					try {
+						return await handleEmitFatura(job as unknown as JobLike<EmitFaturaData>, workerDeps);
+					} finally {
+						currentParent.delete("parent");
+					}
+				}
+				if (jobName === JOB_NAMES.EMIT_COBRANCA) {
+					// emit-cobranca: fan-out de emit-nfcom. Define parent p/ os nfcom.
+					currentParent.set("parent", { id: job.id ?? "", queue: QUEUE_NAMES.EMISSAO });
+					try {
+						const result = await handleEmitCobranca(job as unknown as JobLike<EmitCobrancaData>, workerDeps);
+						return result;
+					} finally {
+						currentParent.delete("parent");
+					}
+				}
+				if (jobName === JOB_NAMES.EMIT_NFCOM) {
+					return handleEmitNfcom(job as unknown as JobLike<EmitNfcomData>, workerDeps);
+				}
+				throw new ErroFatal(`job desconhecido na fila emissao: ${jobName}`);
+			},
+			{
+				connection,
+				...WORKER_DEFAULTS,
+				// Rate-limit: a fila emissao toca Asaas e NFCom. Aplicamos o limite
+				// mais conservador (NFCom, 2 req/s) como teto de concorrência da fila;
+				// os provedores têm seus próprios limites e o Asaas aguenta mais.
+				// Documentado: observar 429s em produção e ajustar (ADR-0002).
+				limiter: rateLimitFor("nfcom"),
+			},
+		);
+
+		worker.on("error", (err) => {
+			log.error({ err, fila: "emissao" }, "erro no worker de emissao");
+		});
+
+		return { worker, flowProducer, queue };
+	})();
+
+	// Retorno síncrono p/ a interface EmissaoWorkers: os handles são resolvidos
+	// na primeira await do composition root. (BullMQ Worker é assíncrono p/ iniciar;
+	// expomos uma promise p/ o root aguardar.)
+	const workersPromise = wiring.then((w) => [w.worker] as import("bullmq").Worker[]);
+	return {
+		get workers() {
+			// O composition root deve aguardar `wiring` antes de usar; expomos o
+			// getter p/ satisfazer a interface. Em uso normal, `gracefulShutdown`
+			// recebe os workers resolvidos.
+			return workersPromise;
+		},
+	} as unknown as EmissaoWorkers;
+}
+
+/**
+ * Consolida o estado final da fatura a partir dos children values do Flow
+ * (segunda passada do parent). Os children de emit-fatura são os emit-cobranca,
+ * cada um com `ResultadoEmitCobranca { boletoOk, notasEnfileiradas, erro? }`.
+ * Para saber o `notasOk[]` (sucesso de cada nota), precisaríamos dos children
+ * de cada emit-cobranca (os emit-nfcom) — o BullMQ expõe via getChildrenValues
+ * no job do emit-cobranca, não no parent. Como simplificação pragmática do
+ * primeiro ciclo, derivamos `notasOk` da `notasEnfileiradas` + `erro`: se a
+ * cobranca não teve erro e enfileirou notas, consideramos ok (a consolidação
+ * fina por nota exigiria agregar os ResultadoEmitNfcom dos grandchildren, o
+ * que o BullMQ não expõe diretamente no parent).
+ *
+ * TODO (futuro): agregar ResultadoEmitNfcom dos grandchildren via um step
+ * intermediário ou evento, p/ consolidação nota-a-nota exata.
+ */
+async function consolidarFaturaOuCobranca(
+	job: import("bullmq").Job,
+	childrenValues: Record<string, ResultadoEmitCobranca>,
+	deps: EmissaoDeps,
+): Promise<{ status: StatusFatura }> {
+	const data = job.data as EmitFaturaData;
+	const db = helperDb(deps.db);
+	const resultados: ResultadoCobranca[] = Object.entries(childrenValues).map(([, v]) => {
+		// Sem acesso aos grandchildren no parent: approxima `notasOk` do boolean
+		// `notasEnfileiradas > 0 && !erro` (a cobranca foi bem).
+		const cobrancaOk = v.boletoOk && !v.erro && v.notasEnfileiradas >= 0;
+		return {
+			cobrancaId: 0, // não temos o id mapeado aqui (children key é opaca)
+			boletoOk: v.boletoOk,
+			notasOk: v.notasEnfileiradas > 0 ? [cobrancaOk] : [],
+		};
+	});
+	const status = consolidar(resultados);
+	await enqueueOutbox(db, {
+		aggregate: "fatura",
+		aggregateId: data.faturaId,
+		payload: { op: "atualizarStatusFatura", id: data.faturaId, status },
+	});
+	await releaseLease(db, data.faturaId);
+	log.info({ faturaId: data.faturaId, status }, "fatura consolidada");
+	return { status };
 }
