@@ -68,8 +68,9 @@ describe("outbox.worker — despacharOutbox (dispatcher)", () => {
 	test("atualizarStatusFatura chama atacado.atualizarStatusFatura(id, status)", async () => {
 		const atacado = fakeAtacado();
 		const payload: OutboxPayload = {
-			method: "atualizarStatusFatura",
-			args: { id: 10, status: "emitindo" },
+			op: "atualizarStatusFatura",
+			id: 10,
+			status: "emitindo",
 		};
 		await despacharOutbox(atacado, payload);
 		expect(atacado.calls).toEqual([
@@ -81,8 +82,10 @@ describe("outbox.worker — despacharOutbox (dispatcher)", () => {
 		const atacado = fakeAtacado();
 		const extra = { idExterno: "pay_1", linkFatura: "http://x", dataEmissao: "2026-09-01" };
 		const payload: OutboxPayload = {
-			method: "atualizarStatusCobranca",
-			args: { id: 20, status: "emitida", extra },
+			op: "atualizarStatusCobranca",
+			id: 20,
+			status: "emitida",
+			extra,
 		};
 		await despacharOutbox(atacado, payload);
 		expect(atacado.calls[0]).toEqual({
@@ -91,37 +94,40 @@ describe("outbox.worker — despacharOutbox (dispatcher)", () => {
 		});
 	});
 
-	test("atualizarStatusNota passa id + input", async () => {
+	test("atualizarStatusNota passa id + campos planos", async () => {
 		const atacado = fakeAtacado();
-		const input = { statusInterno: "emitida", situacao: "autorizada", chave: "K" };
 		const payload: OutboxPayload = {
-			method: "atualizarStatusNota",
-			args: { id: 30, input },
+			op: "atualizarStatusNota",
+			id: 30,
+			statusInterno: "emitida",
+			situacao: "autorizada",
+			chave: "K",
 		};
 		await despacharOutbox(atacado, payload);
 		expect(atacado.calls[0]).toEqual({
 			method: "atualizarStatusNota",
-			args: [30, input],
+			args: [30, { statusInterno: "emitida", situacao: "autorizada", chave: "K" }],
 		});
 	});
 
-	test("registrarErro passa input", async () => {
+	test("registrarErro passa campos planos (não input aninhado)", async () => {
 		const atacado = fakeAtacado();
-		const input = { cobrancaId: 1, erro: "TIMEOUT", mensagem: "x" };
 		const payload: OutboxPayload = {
-			method: "registrarErro",
-			args: { input },
+			op: "registrarErro",
+			cobrancaId: 1,
+			erro: "BOLETO",
+			mensagem: "timeout",
 		};
 		await despacharOutbox(atacado, payload);
 		expect(atacado.calls[0]).toEqual({
 			method: "registrarErro",
-			args: [input],
+			args: [{ cobrancaId: 1, erro: "BOLETO", mensagem: "timeout" }],
 		});
 	});
 
-	test("método desconhecido lança erro", async () => {
+	test("op desconhecido lança erro", async () => {
 		const atacado = fakeAtacado();
-		const payload = { method: "desconhecido", args: {} } as unknown as OutboxPayload;
+		const payload = { op: "desconhecido" } as unknown as OutboxPayload;
 		await expect(despacharOutbox(atacado, payload)).rejects.toThrow(/desconhecido/i);
 	});
 });
@@ -132,7 +138,7 @@ describe("outbox.worker — entregarLinha", () => {
 		await enqueueOutbox(db, {
 			aggregate: "fatura",
 			aggregateId: 1,
-			payload: { method: "atualizarStatusFatura", args: { id: 1, status: "emitindo" } },
+			payload: { op: "atualizarStatusFatura", id: 1, status: "emitindo" },
 		});
 		const [row] = await drainOutbox(db, 10);
 		await entregarLinha(db, atacado, row);
@@ -149,7 +155,7 @@ describe("outbox.worker — entregarLinha", () => {
 		await enqueueOutbox(db, {
 			aggregate: "fatura",
 			aggregateId: 1,
-			payload: { method: "atualizarStatusFatura", args: { id: 1, status: "emitindo" } },
+			payload: { op: "atualizarStatusFatura", id: 1, status: "emitindo" },
 		});
 		const [row] = await drainOutbox(db, 10);
 		await expect(entregarLinha(db, atacado, row)).rejects.toThrow("Atacado fora");
@@ -160,19 +166,19 @@ describe("outbox.worker — entregarLinha", () => {
 });
 
 describe("outbox.worker — drenarEEntregar", () => {
-	test("drena múltiplas linhas de métodos distintos e entrega todas", async () => {
+	test("drena múltiplas linhas de ops distintos e entrega todas", async () => {
 		const atacado = fakeAtacado();
 		await enqueueOutbox(db, {
 			aggregate: "fatura", aggregateId: 1,
-			payload: { method: "atualizarStatusFatura", args: { id: 1, status: "emitida" } },
+			payload: { op: "atualizarStatusFatura", id: 1, status: "emitida" },
 		});
 		await enqueueOutbox(db, {
 			aggregate: "cobranca", aggregateId: 2,
-			payload: { method: "atualizarStatusCobranca", args: { id: 2, status: "emitida" } },
+			payload: { op: "atualizarStatusCobranca", id: 2, status: "emitida" },
 		});
 		await enqueueOutbox(db, {
 			aggregate: "nota", aggregateId: 3,
-			payload: { method: "atualizarStatusNota", args: { id: 3, input: { statusInterno: "emitida" } } },
+			payload: { op: "atualizarStatusNota", id: 3, statusInterno: "emitida" },
 		});
 		const entregues = await drenarEEntregar(db, atacado, 10);
 		expect(entregues).toBe(3);
@@ -182,8 +188,8 @@ describe("outbox.worker — drenarEEntregar", () => {
 
 	test("ordem: mais antiga primeiro (por id)", async () => {
 		const atacado = fakeAtacado();
-		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 1, payload: { method: "atualizarStatusFatura", args: { id: 1, status: "emitindo" } } });
-		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 1, payload: { method: "atualizarStatusFatura", args: { id: 1, status: "emitida" } } });
+		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 1, payload: { op: "atualizarStatusFatura", id: 1, status: "emitindo" } });
+		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 1, payload: { op: "atualizarStatusFatura", id: 1, status: "emitida" } });
 		await drenarEEntregar(db, atacado, 10);
 		expect(atacado.calls.map((c) => c.args[1])).toEqual(["emitindo", "emitida"]);
 	});
@@ -192,11 +198,88 @@ describe("outbox.worker — drenarEEntregar", () => {
 		const atacado = fakeAtacado();
 		await enqueueOutbox(db, {
 			aggregate: "fatura", aggregateId: 1,
-			payload: { method: "atualizarStatusFatura", args: { id: 1, status: "emitida" } },
+			payload: { op: "atualizarStatusFatura", id: 1, status: "emitida" },
 		});
 		const [row] = await drainOutbox(db, 10);
 		await entregarLinha(db, atacado, row);
 		await entregarLinha(db, atacado, row); // replay (at-least-once)
 		expect(atacado.calls.length).toBe(2);
+	});
+});
+
+/**
+ * Validação cruzada (revisão CRITICAL): os payloads que o worker de EMISSÃO
+ * enfileira (op flat) devem ser despachados pelo RELAY. Este é o contrato que
+ * o bug derrotou — emission produz `{op, id, status}` e relay lia `{method,
+ * args}`. A regressão garante que as duas metades interoperam.
+ */
+describe("outbox.worker — interop com o worker de emissão", () => {
+	// Payloads idênticos aos que emissao.worker.ts produz (grep enqueueOutbox).
+	const payloadsReais = {
+		faturaEmitindo: { op: "atualizarStatusFatura", id: 5, status: "emitindo" },
+		cobrancaEmitida: {
+			op: "atualizarStatusCobranca", id: 42, status: "emitida",
+			extra: { idExterno: "pay_9", linkFatura: "http://asaas/9", dataEmissao: "2026-09-10" },
+		},
+		cobrancaErro: { op: "atualizarStatusCobranca", id: 42, status: "erro" },
+		notaAutorizada: {
+			op: "atualizarStatusNota", id: 7, statusInterno: "emitida", situacao: "autorizada",
+			numero: 123, serie: 1, chave: "K44", protocolo: "P", pdfUrl: "http://pdf", xmlUrl: "http://xml",
+		},
+		notaErro: { op: "atualizarStatusNota", id: 7, statusInterno: "erro" },
+		erroBoleto: { op: "registrarErro", cobrancaId: 42, erro: "BOLETO", mensagem: "timeout" },
+		erroNfcom: { op: "registrarErro", notaId: 7, erro: "NFCOM_DEDUP", mensagem: "suspeita" },
+		faturaConsolidada: { op: "atualizarStatusFatura", id: 5, status: "parcial" },
+	};
+
+	test("cada payload real do worker de emissão é despachado sem 'op desconhecido'", async () => {
+		for (const [nome, payload] of Object.entries(payloadsReais)) {
+			const atacado = fakeAtacado();
+			await despacharOutbox(atacado, payload as OutboxPayload);
+			expect(atacado.calls.length).toBeGreaterThanOrEqual(1);
+		}
+	});
+
+	test("fatura emitindo → atualizarStatusFatura(5, 'emitindo')", async () => {
+		const atacado = fakeAtacado();
+		await despacharOutbox(atacado, payloadsReais.faturaEmitindo as OutboxPayload);
+		expect(atacado.calls[0]).toEqual({ method: "atualizarStatusFatura", args: [5, "emitindo"] });
+	});
+
+	test("cobrança emitida → atualizarStatusCobranca com extra", async () => {
+		const atacado = fakeAtacado();
+		await despacharOutbox(atacado, payloadsReais.cobrancaEmitida as OutboxPayload);
+		expect(atacado.calls[0].method).toBe("atualizarStatusCobranca");
+		expect(atacado.calls[0].args[0]).toBe(42);
+		expect(atacado.calls[0].args[1]).toBe("emitida");
+		expect(atacado.calls[0].args[2]).toEqual(payloadsReais.cobrancaEmitida.extra);
+	});
+
+	test("nota autorizada → atualizarStatusNota com todos os campos", async () => {
+		const atacado = fakeAtacado();
+		await despacharOutbox(atacado, payloadsReais.notaAutorizada as OutboxPayload);
+		expect(atacado.calls[0].method).toBe("atualizarStatusNota");
+		expect(atacado.calls[0].args[0]).toBe(7);
+		expect(atacado.calls[0].args[1]).toMatchObject({
+			statusInterno: "emitida", situacao: "autorizada", chave: "K44", pdfUrl: "http://pdf",
+		});
+	});
+
+	test("erro de boleto → registrarErro(cobrancaId)", async () => {
+		const atacado = fakeAtacado();
+		await despacharOutbox(atacado, payloadsReais.erroBoleto as OutboxPayload);
+		expect(atacado.calls[0]).toEqual({
+			method: "registrarErro",
+			args: [{ cobrancaId: 42, erro: "BOLETO", mensagem: "timeout" }],
+		});
+	});
+
+	test("erro de nfcom → registrarErro(notaId)", async () => {
+		const atacado = fakeAtacado();
+		await despacharOutbox(atacado, payloadsReais.erroNfcom as OutboxPayload);
+		expect(atacado.calls[0]).toEqual({
+			method: "registrarErro",
+			args: [{ notaId: 7, erro: "NFCOM_DEDUP", mensagem: "suspeita" }],
+		});
 	});
 });

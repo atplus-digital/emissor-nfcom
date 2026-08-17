@@ -19,7 +19,7 @@ import {
 	resolveKey,
 	type IdempotencyAcquire,
 } from "#/lib/db/idempotency";
-import { acquireLease, releaseLease } from "#/lib/db/lease";
+import { acquireLease, reassumirLeaseSeStale, releaseLease } from "#/lib/db/lease";
 import { enqueueOutbox } from "#/lib/db/outbox";
 import { mapearSituacaoNota } from "#/domain/emissao/situacao";
 import { consolidarFatura, type ResultadoCobranca } from "#/domain/emissao/consolidacao";
@@ -141,6 +141,12 @@ export interface EmissaoDeps {
 	enqueueFilho?: (name: string, data: unknown) => Promise<void>;
 	/** Carrega a fatura com árvore (cobranças + notas). Default via atacado.buscarFaturaPorChave. */
 	carregarFatura?: (faturaId: number, parceiroId: number, dataReferencia: string) => Promise<Fatura | null>;
+	/**
+	 * Limiar de staleness do lease (ms). Se o lease está sendo há mais que isso,
+	 * assume-se morto (BullMQ stalled/failed) e reassume (SPEC-0001 caso 2).
+	 * Default 3 min. O composition root injeta conforme stalledInterval/maxStalledCount.
+	 */
+	limiteLeaseStaleMs?: number;
 }
 
 /** Passa o DB de coordenação aos helpers de lib/db (tipos reconciliados — CoordDB). */
@@ -171,10 +177,18 @@ export async function handleEmitFatura(
 	const { faturaId, parceiroId, dataReferencia } = job.data;
 	return runWithLogContext({ faturaId, jobId: job.id, fila: "emissao" }, async () => {
 		const db = helperDb(deps.db);
-		const acquired = await acquireLease(db, faturaId);
+		let acquired = await acquireLease(db, faturaId);
 		if (!acquired) {
-			log.warn({ faturaId }, "fatura com lease ativo — outro job detém; pulando");
-			return { enfileiradas: 0 };
+			// SPEC-0001 caso 2: lease já existe — pode ser de um job morto (stalled/
+			// failed sem release). Tenta reassumir se stale (limiar de tempo).
+			const limite = deps.limiteLeaseStaleMs ?? 3 * 60 * 1000;
+			const reassumido = await reassumirLeaseSeStale(db, faturaId, limite);
+			if (!reassumido) {
+				log.warn({ faturaId }, "fatura com lease ativo — outro job detém; pulando");
+				return { enfileiradas: 0 };
+			}
+			acquired = true;
+			log.warn({ faturaId }, "lease stale reassumido (job anterior presumido morto)");
 		}
 		// carrega a fatura
 		const carregar = deps.carregarFatura ?? (async (id, p, dr) => deps.atacado.buscarFaturaPorChave(p, dr));

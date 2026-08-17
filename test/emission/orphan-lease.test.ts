@@ -48,4 +48,28 @@ describe("SPEC-0001 caso 2 — orphan lease reassume", () => {
 		expect(res.enfileiradas).toBe(0);
 		expect(enqueued.length).toBe(0);
 	});
+
+	test("lease stale (job morto sem release) → reassume e prossegue (caso 2)", async () => {
+		const db = await mkDb();
+		const { faturaLease } = await import("#/lib/db/schema");
+		// Insere um lease stale (emitindo_since há 10 min — bem além do limiar de 3 min).
+		const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+		await db.insert(faturaLease).values({ faturaId: 510, emitindoSince: stale });
+		const fatura = {
+			id: 510, parceiroId: 1, dataReferencia: "2026-08-01", dataVencimento: "2026-09-10",
+			valorTotal: 10000, tipoFaturamento: "parceiro" as const, status: "a-emitir",
+			cobrancas: [
+				{ id: 511, faturaId: 510, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10", notas: [] },
+			],
+		};
+		const atacado = { buscarFaturaPorChave: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort;
+		const enqueued: string[] = [];
+		const res = await handleEmitFatura(
+			{ data: { faturaId: 510, parceiroId: 1, dataReferencia: "2026-08-01" }, attemptsMade: 0, opts: {} } as any,
+			{ db, atacado, asaas: {} as any, nfcom: {} as any, cfop: "6102", cclass: "X", limiteLeaseStaleMs: 3 * 60 * 1000, enqueueFilho: async (name) => { enqueued.push(name); } },
+		);
+		// reassumiu: enfileirou a cobrança a-emitir (não pulou)
+		expect(res.enfileiradas).toBe(1);
+		expect(enqueued.filter((n) => n === "emit-cobranca").length).toBe(1);
+	});
 });

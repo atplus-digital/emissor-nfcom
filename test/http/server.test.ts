@@ -39,4 +39,17 @@ describe("criarApp (composition)", () => {
 		});
 		expect(res.status).toBe(401);
 	});
+
+	it("POST /faturas/preparar com body inválido → 422 VALIDACAO (handler canônico, não 500)", async () => {
+		const app = criarApp({ atacado: fakeAtacado, queue: fakeQueue, apiKey: "secret" });
+		// Body faltando campos obrigatórios → Zod invalida.
+		const res = await app.request("/faturas/preparar", {
+			method: "POST",
+			headers: { "content-type": "application/json", "x-api-key": "secret" },
+			body: JSON.stringify({ parceiroId: "não-numérico" }),
+		});
+		expect(res.status).toBe(422);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("VALIDACAO");
+	});
 });

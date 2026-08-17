@@ -101,4 +101,27 @@ describe("POST /faturas/preparar — upsert (SPEC-0002 casos 5,6,14)", () => {
 		});
 		expect(res.status).toBe(201);
 	});
+
+	test("criação: resposta traz os IDs reais retornados pelo Atacado (não fake)", async () => {
+		const app = criarFaturasRoutes({
+			atacado: fakeAtacado({
+				buscarFaturaPorChave: async () => null,
+				criarFatura: async () => ({ id: 9001 }),
+				criarCobranca: async () => ({ id: 1001 }),
+				criarNota: async () => ({ id: 2002 }),
+			}),
+			queue: fakeQueue(),
+		});
+		const res = await app.request("/faturas/preparar", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ parceiroId: 42, dataReferencia: "2026-08-01", tipoFaturamento: "parceiro" }),
+		});
+		expect(res.status).toBe(201);
+		const body = await res.json();
+		expect(body.faturaId).toBe(9001);
+		expect(body.cobrancas[0].id).toBe(1001);
+		expect(body.cobrancas[0].notas[0].id).toBe(2002);
+		expect(body.cobrancas[0].notas[0].cobrancaId).toBe(1001);
+	});
 });

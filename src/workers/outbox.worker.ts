@@ -24,54 +24,90 @@ import { QUEUE_NAMES, JOB_NAMES } from "#/lib/queue-names";
 
 /** DB de coordenação — alinhado ao tipo aceito pelos helpers de outbox. */
 
-/** Payload do outbox: qual método da AtacadoPort chamar + args nomeados. */
+/**
+ * Payload do outbox: discriminação por `op` (flat). **Deve casar exatamente**
+ * com o que `src/workers/emissao.worker.ts` enfileira (`enqueueOutbox`).
+ * Cada variante leva os campos nomeados que o método correspondente da
+ * `AtacadoPort` consome — o dispatcher os repassa (sem `args` aninhado).
+ */
 export type OutboxPayload =
-	| { method: "atualizarStatusFatura"; args: { id: number; status: string } }
+	| { op: "atualizarStatusFatura"; id: number; status: string }
 	| {
-			method: "atualizarStatusCobranca";
-			args: { id: number; status: string; extra?: Record<string, unknown> };
+			op: "atualizarStatusCobranca";
+			id: number;
+			status: string;
+			extra?: { idExterno?: string; linkFatura?: string; dataEmissao?: string };
 	  }
-	| { method: "atualizarStatusNota"; args: { id: number; input: Record<string, unknown> } }
-	| { method: "registrarErro"; args: { input: Record<string, unknown> } };
+	| {
+			op: "atualizarStatusNota";
+			id: number;
+			statusInterno?: string;
+			situacao?: string;
+			numero?: number;
+			serie?: number;
+			chave?: string;
+			protocolo?: string;
+			pdfUrl?: string;
+			xmlUrl?: string;
+	  }
+	| {
+			op: "registrarErro";
+			cobrancaId?: number;
+			notaId?: number;
+			erro: string;
+			mensagem: string;
+			statusCode?: string;
+	  };
 
 /**
  * Despacha um payload outbox para o método correspondente de `AtacadoPort`.
  * Puro (sem I/O de SQLite) — testável isoladamente com um AtacadoPort fake.
- * Lança se o método for desconhecido (payload corrompido).
+ * Lança se `op` for desconhecido (payload corrompido). O `op` casa 1:1 com o
+ * que o worker de emissão produz (revisão CRITICAL: relay e producer devem
+ * falar o mesmo contrato — caso contrário nenhuma mudança de estado chega
+ * ao Atacado).
  */
 export async function despacharOutbox(
 	atacado: AtacadoPort,
 	payload: OutboxPayload,
 ): Promise<void> {
-	switch (payload.method) {
+	switch (payload.op) {
 		case "atualizarStatusFatura":
 			await atacado.atualizarStatusFatura(
-				payload.args.id,
-				payload.args.status as Parameters<AtacadoPort["atualizarStatusFatura"]>[1],
+				payload.id,
+				payload.status as Parameters<AtacadoPort["atualizarStatusFatura"]>[1],
 			);
 			return;
 		case "atualizarStatusCobranca":
 			await atacado.atualizarStatusCobranca(
-				payload.args.id,
-				payload.args.status as Parameters<AtacadoPort["atualizarStatusCobranca"]>[1],
-				payload.args.extra as Parameters<AtacadoPort["atualizarStatusCobranca"]>[2],
+				payload.id,
+				payload.status as Parameters<AtacadoPort["atualizarStatusCobranca"]>[1],
+				payload.extra as Parameters<AtacadoPort["atualizarStatusCobranca"]>[2],
 			);
 			return;
-		case "atualizarStatusNota":
-			await atacado.atualizarStatusNota(
-				payload.args.id,
-				payload.args.input as Parameters<AtacadoPort["atualizarStatusNota"]>[1],
-			);
+		case "atualizarStatusNota": {
+			const { id, statusInterno, situacao, numero, serie, chave, protocolo, pdfUrl, xmlUrl } = payload;
+			await atacado.atualizarStatusNota(id, {
+				statusInterno: statusInterno as Parameters<AtacadoPort["atualizarStatusNota"]>[1]["statusInterno"],
+				situacao: situacao as Parameters<AtacadoPort["atualizarStatusNota"]>[1]["situacao"],
+				numero,
+				serie,
+				chave,
+				protocolo,
+				pdfUrl,
+				xmlUrl,
+			});
 			return;
-		case "registrarErro":
-			await atacado.registrarErro(
-				payload.args.input as unknown as Parameters<AtacadoPort["registrarErro"]>[0],
-			);
+		}
+		case "registrarErro": {
+			const { cobrancaId, notaId, erro, mensagem, statusCode } = payload;
+			await atacado.registrarErro({ cobrancaId, notaId, erro, mensagem, statusCode });
 			return;
+		}
 		default: {
 			const _exhaustive: never = payload;
-			const msg = `despacharOutbox: método desconhecido: ${
-				(payload as { method: string }).method
+			const msg = `despacharOutbox: op desconhecido: ${
+				(payload as { op: string }).op
 			}`;
 			throw new Error(msg);
 		}
@@ -92,11 +128,11 @@ export async function entregarLinha(
 	try {
 		await despacharOutbox(atacado, payload);
 		await markOutboxDone(db, row.id);
-		log.debug({ outboxId: row.id, method: payload.method }, "outbox entregue");
+		log.debug({ outboxId: row.id, op: payload.op }, "outbox entregue");
 	} catch (err) {
 		await incOutboxAttempts(db, row.id);
 		log.warn(
-			{ err, outboxId: row.id, method: payload.method, aggregate: row.aggregate },
+			{ err, outboxId: row.id, op: payload.op, aggregate: row.aggregate },
 			"outbox: entrega falhou (relay retenta)",
 		);
 		throw err;

@@ -24,10 +24,10 @@ import type { Fatura } from "#/domain/types";
 import type { AtacadoPort } from "#/domain/ports/atacado.port";
 import type { QueuePort } from "#/domain/ports/queue.port";
 import {
-	HttpError,
 	TipoErro,
 	erroResponse,
 } from "#/http/middlewares/envelope";
+import { errorHandler } from "#/http/middlewares/error-handler";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { log } from "#/lib/logger";
 
@@ -70,17 +70,12 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 	const queue = deps.queue;
 	const app = new Hono();
 
-	// Error handler: traduz HttpError → envelope canônico (CONVENTIONS). Erros
-	// não-HttpError viram 500 ERRO_INTERNO. Loga uma vez aqui (ADR-0008).
-	app.onError((err, c) => {
-		if (err instanceof HttpError) {
-			const { corpo, status } = err.toResponse();
-			return c.json(corpo, status as ContentfulStatusCode);
-		}
-		log.error({ err }, "erro não tratado na rota de faturas");
-		const { corpo, status } = erroResponse(TipoErro.ERRO_INTERNO, "Erro interno");
-		return c.json(corpo, status as ContentfulStatusCode);
-	});
+	// Reusa o error-handler CANÔNICO (o mesmo montado no app pai em server.ts):
+	// HttpError → envelope, ZodError → 422 VALIDACAO, erro genérico → 500, logado
+	// uma vez com tipo+status (ADR-0008 §4). Não diverge do handler do pai — é o
+	// mesmo; montado no sub-app só para que a rota seja testável isoladamente
+	// (sem o app pai) e ainda assim responda o envelope.
+	app.onError(errorHandler());
 
 	// ============================================================
 	// POST /faturas/preparar (SPEC-0002 — síncrono)
@@ -101,7 +96,8 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 		if (existente) {
 			if (STATUS_EM_EMISSAO.includes(existente.status) || STATUS_FORA_CICLO.includes(existente.status)) {
 				// Casos 5/14: fatura já entrou na emissão ou está fora do ciclo.
-				throw new HttpError(TipoErro.CONFLITO, "Fatura já entrou na emissão ou está fora do ciclo de emissão");
+				const { corpo, status } = erroResponse(TipoErro.CONFLITO, "Fatura já entrou na emissão ou está fora do ciclo de emissão");
+				return c.json(corpo, status as ContentfulStatusCode);
 			}
 			// existe e status a-emitir → atualização (caso 6).
 			modo = "atualizacao";
@@ -183,6 +179,7 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 					status: "a-emitir",
 					dataVencimento: cb.dataVencimento,
 				});
+				cb.id = cobranca.id;
 				for (const nota of cb.notas) {
 					const notaCriada = await atacado.criarNota(cobranca.id, {
 						nome: nota.nome,
@@ -196,6 +193,8 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 						statusInterno: "a-emitir",
 						total: nota.total,
 					});
+					nota.id = notaCriada.id;
+					nota.cobrancaId = cobranca.id;
 					for (const item of nota.itens) {
 						await atacado.criarItem(notaCriada.id, {
 							codigo: item.codigo,
@@ -217,10 +216,11 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 			// Caso 7: rollback manual estrito (criação aborta e remove a árvore).
 			log.error({ err, faturaId }, "falha na persistência da árvore — rollback");
 			await atacado.removerArvore(faturaId);
-			throw new HttpError(TipoErro.ERRO_INTERNO, "Falha ao persistir a árvore da fatura");
+			const { corpo, status } = erroResponse(TipoErro.ERRO_INTERNO, "Falha ao persistir a árvore da fatura");
+			return c.json(corpo, status as ContentfulStatusCode);
 		}
 
-		// Passo 8: resposta 201 (criação) / 200 (atualização) com a árvore.
+		// Passo 8: resposta 201 (criação) / 200 (atualização) com a árvore (IDs reais).
 		const resposta = serializarFatura(fatura, faturaId);
 		return c.json(resposta, modo === "criacao" ? 201 : 200);
 	});
@@ -308,7 +308,7 @@ async function carregarFatura(atacado: AtacadoComLeitura, id: number): Promise<F
 	return null;
 }
 
-/** Serializa a fatura criada/atualizada para a resposta (domínio → JSON). */
+/** Serializa a fatura criada/atualizada para a resposta (domínio → JSON, IDs reais). */
 function serializarFatura(fatura: Fatura, faturaId: number): unknown {
 	return {
 		faturaId,
@@ -317,19 +317,19 @@ function serializarFatura(fatura: Fatura, faturaId: number): unknown {
 		dataVencimento: fatura.dataVencimento,
 		valorTotal: fatura.valorTotal,
 		tipoFaturamento: fatura.tipoFaturamento,
-		cobrancas: fatura.cobrancas.map((cb, i) => ({
-			id: 456 + i,
+		cobrancas: fatura.cobrancas.map((cb) => ({
+			id: cb.id,
 			valorTotal: cb.valorTotal,
 			nomeDevedor: cb.nomeDevedor,
 			documentoDevedor: cb.documentoDevedor,
 			emailDevedor: cb.emailDevedor,
 			status: cb.status,
-			notas: cb.notas.map((n, j) => ({
-				id: 7 + j,
+			notas: cb.notas.map((n) => ({
+				id: n.id,
 				nome: n.nome,
 				cpfcnpj: n.cpfcnpj,
 				endereco: n.endereco,
-				cobrancaId: 456 + i,
+				cobrancaId: cb.id,
 				status: n.statusInterno,
 			})),
 		})),
