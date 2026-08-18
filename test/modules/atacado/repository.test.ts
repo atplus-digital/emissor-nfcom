@@ -158,17 +158,17 @@ describe("AtacadoRepository > removerArvore", () => {
 	it("ordem: itens → notas → cobranças (não remove a fatura)", async () => {
 		const calls: string[] = [];
 		const { client } = mockClient({
-			list: async () => [
-				{
-					id: 1,
-					f_cobrancas: [
-						{
-							id: 50,
-							f_notas_fiscais: [{ id: 11, f_nota_itens: [{ id: 21 }] }],
-						},
-					],
-				},
-			],
+			// removerArvore usa :get (não :list) — filterByTk é ignorado em :list
+			// no NocoBase, o que faria remover a árvore da primeira fatura da lista.
+			get: async () => ({
+				id: 1,
+				f_cobrancas: [
+					{
+						id: 50,
+						f_notas_fiscais: [{ id: 11, f_nota_itens: [{ id: 21 }] }],
+					},
+				],
+			}),
 			destroy: async (_col: string, id: number) => {
 				calls.push(`${_col}:${id}`);
 			},
@@ -184,6 +184,21 @@ describe("AtacadoRepository > removerArvore", () => {
 		expect(notaIdx).toBeLessThan(cobIdx);
 		// fatura NÃO é destruída
 		expect(calls.find((c) => c.startsWith("t_nfcom_faturas"))).toBeUndefined();
+	});
+
+	it("usa :get (não :list) com filterByTk — :list ignora filterByTk no NocoBase", async () => {
+		// Regressão: removerArvore antes usava list({filterByTk}), mas :list
+		// ignora filterByTk e retorna todas as faturas — pegava [0] e removia a
+		// árvore da fatura errada (ou nenhuma, se a primeira não tinha cobranças).
+		const { client, calls } = mockClient({
+			get: async () => ({ id: 5, f_cobrancas: [] }),
+			list: async () => [{ id: 999, f_cobrancas: [{ id: 1 }] }],
+		});
+		const repo = new AtacadoRepository(client);
+		await repo.removerArvore(5);
+		// chamou get com filterByTk=5, NÃO chamou list
+		expect(calls.get[0]).toMatchObject(["t_nfcom_faturas", expect.objectContaining({ filterByTk: 5 })]);
+		expect(calls.list).toBeUndefined();
 	});
 });
 

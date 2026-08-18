@@ -161,17 +161,20 @@ export class AtacadoRepository implements AtacadoPort {
 	 * Remove a árvore de cobranças/notas/itens de uma fatura. **A fatura é
 	 * reutilizada** no modo atualização (SPEC-0002 caso 6). Ordem: itens →
 	 * notas → cobranças (evita órfãos de FK).
+	 *
+	 * Usa `:get` (não `:list`) — `filterByTk` é ignorado pelo NocoBase em
+	 * `:list` (retorna todas as faturas), o que faria `removerArvore` remover a
+	 * árvore da primeira fatura da lista, não da alvo.
 	 */
 	async removerArvore(faturaId: number): Promise<void> {
-		const faturas = await this.client.list(COL.faturas, {
+		const fatura = (await this.client.get(COL.faturas, {
 			filterByTk: faturaId,
 			appends: [
 				"f_cobrancas",
 				"f_cobrancas.f_notas_fiscais",
 				"f_cobrancas.f_notas_fiscais.f_nota_itens",
 			],
-		});
-		const fatura = (faturas as FaturaExterna[])[0];
+		})) as FaturaExterna | undefined;
 		if (!fatura?.f_cobrancas) return;
 
 		for (const cob of fatura.f_cobrancas as CobrancaExterna[]) {
