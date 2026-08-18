@@ -37,6 +37,9 @@ export interface CriarFaturaInput {
 }
 
 export interface CriarCobrancaInput {
+	/** Descrição exibida na cobrança (campo obrigatório `f_descricao` do CRM) —
+	 * derivada dos itens + referência de mês (SPEC-0002). */
+	descricao: string;
 	valorTotal: number;
 	nomeDevedor: string;
 	documentoDevedor: string;

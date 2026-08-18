@@ -12,6 +12,7 @@
  * tipoFaturamento no enum).
  */
 import { calcularFatura } from "#/domain/fatura/calculo";
+import { montarDescricaoCobranca } from "#/modules/atacado/translators/cobranca";
 import { normalizarDataReferencia } from "#/domain/fatura/normalizacao";
 import {
 	validarDocumentos,
@@ -183,7 +184,11 @@ export async function executarPreparacao(
 
 	try {
 		for (const cb of fatura.cobrancas) {
+			// `f_descricao` obrigatória no CRM — derivada dos itens das notas da
+			// cobrança + referência de mês (a cobrança no domínio não tem texto).
+			const itensDaCobranca = cb.notas.flatMap((n) => n.itens);
 			const cobranca = await atacado.criarCobranca(faturaId, {
+				descricao: montarDescricaoCobranca(itensDaCobranca, fatura.dataReferencia),
 				valorTotal: cb.valorTotal,
 				nomeDevedor: cb.nomeDevedor,
 				documentoDevedor: cb.documentoDevedor,

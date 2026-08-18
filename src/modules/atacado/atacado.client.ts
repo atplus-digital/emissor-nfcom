@@ -3,6 +3,8 @@
  *
  * Convenções do NocoBase (ADR-0004):
  * - Ação como sufixo de rota: `<coleção>:get` / `:list` / `:create` / `:destroy`.
+ * - Coleção é o nome da **tabela** (`t_*`), não o nome de rota amigável.
+ * - Multi-app via header `X-App` (não na rota) — `NOCOBASE_APP`.
  * - `filterByTk` p/ lookup por id (PK); `filter` p/ filtros de campo.
  * - `appends` carrega relações na query.
  * - Destroy via POST `:destroy` (não DELETE HTTP).
@@ -88,26 +90,36 @@ export function createAtacadoClient(
 		};
 	};
 
-	const headers = (apiKey: string): Record<string, string> => ({
+	const headers = (apiKey: string, app: string): Record<string, string> => ({
 		"Content-Type": "application/json",
 		Authorization: `Bearer ${apiKey}`,
+		// Multi-app do NocoBase (ADR-0004): app vai como header X-App,
+		// nunca na rota. Vazio → header omitido.
+		...(app ? { "X-App": app } : {}),
 	});
 
 	const url = (
 		base: string,
-		app: string,
 		colecao: string,
 		acao: string,
 		query?: Record<string, unknown>,
 	) => {
-		const appPath = app ? `/${app}` : "";
-		const u = new URL(`${base}${appPath}/api/${colecao}:${acao}`);
+		const u = new URL(`${base}/${colecao}:${acao}`);
 		if (query) {
 			for (const [k, v] of Object.entries(query)) {
 				if (v === undefined) continue;
+				// NocoBase: `filter` (objeto) vai como JSON; `appends` (array) vai
+				// como CSV — JSON.stringify num array vira `["a","b"]`, que o
+				// NocoBase interpreta como um único nome de associação e rejeita
+				// com "association ... not found". Arrays → join(","); objetos →
+				// JSON; primitivos → String (não envolve strings em aspas).
 				u.searchParams.set(
 					k,
-					typeof v === "object" ? JSON.stringify(v) : String(v),
+					Array.isArray(v)
+						? v.join(",")
+						: typeof v === "object"
+							? JSON.stringify(v)
+							: String(v),
 				);
 			}
 		}
@@ -134,22 +146,30 @@ export function createAtacadoClient(
 		return text ? JSON.parse(text) : undefined;
 	};
 
+	/** Extrai o registro do envelope NocoBase `{ data: ... }` — mesma regra do
+	 * `list` (pode vir envelope ou corpo direto em variações da API). */
+	const unwrapData = (raw: any): any =>
+		raw && typeof raw === "object" && !Array.isArray(raw) && "data" in raw
+			? raw.data
+			: raw;
+
 	return {
 		async get(colecao, query) {
 			const { baseUrl, apiKey, app } = await resolveCreds();
-			return requestJson(
-				url(baseUrl, app, colecao, "get", query as Record<string, unknown>),
-				{ method: "GET", headers: headers(apiKey) },
+			const raw = await requestJson(
+				url(baseUrl, colecao, "get", query as Record<string, unknown>),
+				{ method: "GET", headers: headers(apiKey, app) },
 			);
+			return unwrapData(raw);
 		},
 		async list(colecao, query) {
 			const { baseUrl, apiKey, app } = await resolveCreds();
 			const q = { pageSize: 9999, ...query } as Record<string, unknown>;
 			const data: any = await requestJson(
-				url(baseUrl, app, colecao, "list", q),
+				url(baseUrl, colecao, "list", q),
 				{
 					method: "GET",
-					headers: headers(apiKey),
+					headers: headers(apiKey, app),
 				},
 			);
 			// NocoBase: resposta pode vir como { data: [...] } ou array direto
@@ -157,18 +177,19 @@ export function createAtacadoClient(
 		},
 		async create(colecao, body) {
 			const { baseUrl, apiKey, app } = await resolveCreds();
-			return requestJson(url(baseUrl, app, colecao, "create"), {
+			const raw = await requestJson(url(baseUrl, colecao, "create"), {
 				method: "POST",
-				headers: headers(apiKey),
+				headers: headers(apiKey, app),
 				body: JSON.stringify(body),
 			});
+			return unwrapData(raw);
 		},
 		async update(colecao, id, body) {
 			const { baseUrl, apiKey, app } = await resolveCreds();
 			const { res, text } = await httpFetch({
-				url: url(baseUrl, app, colecao, "update", { filterByTk: id }),
+				url: url(baseUrl, colecao, "update", { filterByTk: id }),
 				method: "POST",
-				headers: headers(apiKey),
+				headers: headers(apiKey, app),
 				body: JSON.stringify(body),
 				fetchImpl,
 			});
@@ -187,9 +208,9 @@ export function createAtacadoClient(
 		async destroy(colecao, id) {
 			const { baseUrl, apiKey, app } = await resolveCreds();
 			const { res, text } = await httpFetch({
-				url: url(baseUrl, app, colecao, "destroy", { filterByTk: id }),
+				url: url(baseUrl, colecao, "destroy", { filterByTk: id }),
 				method: "POST",
-				headers: headers(apiKey),
+				headers: headers(apiKey, app),
 				fetchImpl,
 			});
 			if (!res.ok) {

@@ -10,11 +10,10 @@
  * ADR-0003) — o worker de emissão enfileira e o relay invoca estas chamadas.
  * Idempotente: update por id suporta replay ao-menos-uma-vez (ADR-0003).
  *
- * Coleções NocoBase (table → route name):
- *   t_nfcom_faturas → nfcom-faturas; t_nfcom_cobrancas → nfcom-cobrancas;
- *   t_nfcom_notas → nfcom-notas; t_nfcom_itens → nfcom-itens;
- *   t_parceiros → parceiros; t_clientes → clientes; t_planos_de_servico → planos-de-servico;
- *   t_nfcom_erros → nfcom-erros.
+ * Coleções NocoBase — a rota da API usa o **nome da tabela** (`t_*`), não o
+ * nome amigável (ADR-0004):
+ *   t_nfcom_faturas, t_nfcom_cobrancas, t_nfcom_notas, t_nfcom_itens,
+ *   t_parceiros, t_clientes, t_planos_de_servico, t_nfcom_erros.
  */
 import type {
 	AtacadoPort,
@@ -40,14 +39,14 @@ import { notaToCreate } from "./translators/nota";
 import { parceiroToDomain, type ParceiroExterno } from "./translators/parceiro";
 
 const COL = {
-	faturas: "nfcom-faturas",
-	cobrancas: "nfcom-cobrancas",
-	notas: "nfcom-notas",
-	itens: "nfcom-itens",
-	parceiros: "parceiros",
-	clientes: "clientes",
-	planos: "planos-de-servico",
-	erros: "nfcom-erros",
+	faturas: "t_nfcom_faturas",
+	cobrancas: "t_nfcom_cobrancas",
+	notas: "t_nfcom_notas",
+	itens: "t_nfcom_itens",
+	parceiros: "t_parceiros",
+	clientes: "t_clientes",
+	planos: "t_planos_de_servico",
+	erros: "t_nfcom_erros",
 };
 
 export class AtacadoRepository implements AtacadoPort {
@@ -66,11 +65,19 @@ export class AtacadoRepository implements AtacadoPort {
 	}
 
 	async buscarClientesAtivosPorParceiro(parceiroId: number): Promise<Cliente[]> {
-		const rows = await this.client.list(COL.clientes, {
-			filter: { f_fk_parceiro: parceiroId },
-			appends: ["f_linhas_fixas", "f_linhas_fixas.f_planos_de_servico"],
-		});
-		return (rows as ClienteExterno[]).map(clienteToDomain);
+		try {
+			const rows = await this.client.list(COL.clientes, {
+				filter: { f_fk_parceiro: parceiroId },
+				appends: ["f_linhas_fixas", "f_linhas_fixas.f_planos_de_servico"],
+			});
+			return (rows as ClienteExterno[]).map(clienteToDomain);
+		} catch (err) {
+			// NocoBase responde 404 em `list` quando não há clientes do parceiro →
+			// lista vazia (a rota vira 422 VALIDACAO, SPEC-0002 caso 2). Outros
+			// erros (5xx, etc.) propagam — são retryable/fatal no worker.
+			if (err instanceof AtacadoError && err.statusCode === 404) return [];
+			throw err;
+		}
 	}
 
 	async buscarPlanosDeServico(): Promise<Plano[]> {

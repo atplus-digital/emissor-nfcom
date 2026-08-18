@@ -90,7 +90,7 @@ describe("AtacadoRepository > criação da árvore", () => {
 			status: "a-emitir",
 		});
 		expect(r).toEqual({ id: 101 });
-		expect(calls.create[0][0]).toContain("nfcom-faturas");
+		expect(calls.create[0][0]).toContain("t_nfcom_faturas");
 		expect(calls.create[0][1]).toMatchObject({ f_status: "a-emitir" });
 	});
 
@@ -172,14 +172,14 @@ describe("AtacadoRepository > removerArvore", () => {
 		const repo = new AtacadoRepository(client);
 		await repo.removerArvore(1);
 		// espera que destrua itens antes de notas, notas antes de cobranças
-		const itemIdx = calls.findIndex((c) => c.startsWith("nfcom-itens"));
-		const notaIdx = calls.findIndex((c) => c.startsWith("nfcom-notas"));
-		const cobIdx = calls.findIndex((c) => c.startsWith("nfcom-cobrancas"));
+		const itemIdx = calls.findIndex((c) => c.startsWith("t_nfcom_itens"));
+		const notaIdx = calls.findIndex((c) => c.startsWith("t_nfcom_notas"));
+		const cobIdx = calls.findIndex((c) => c.startsWith("t_nfcom_cobrancas"));
 		expect(itemIdx).toBeGreaterThanOrEqual(0);
 		expect(itemIdx).toBeLessThan(notaIdx);
 		expect(notaIdx).toBeLessThan(cobIdx);
 		// fatura NÃO é destruída
-		expect(calls.find((c) => c.startsWith("nfcom-faturas"))).toBeUndefined();
+		expect(calls.find((c) => c.startsWith("t_nfcom_faturas"))).toBeUndefined();
 	});
 });
 
@@ -190,7 +190,7 @@ describe("AtacadoRepository > atualização de estado", () => {
 		});
 		const repo = new AtacadoRepository(client);
 		await repo.atualizarStatusFatura(101, "emitindo");
-		expect(calls.update[0][0]).toContain("nfcom-faturas");
+		expect(calls.update[0][0]).toContain("t_nfcom_faturas");
 		expect(calls.update[0]).toMatchObject([expect.any(String), 101, { f_status: "emitindo" }]);
 	});
 
@@ -242,7 +242,7 @@ describe("AtacadoRepository > atualização de estado", () => {
 			mensagem: "timeout",
 			statusCode: "504",
 		});
-		expect(calls.create[0][0]).toContain("nfcom-erros");
+		expect(calls.create[0][0]).toContain("t_nfcom_erros");
 		expect(calls.create[0][1]).toMatchObject({
 			f_fk_cobranca: 456,
 			f_erro: "Timeout NFCom",
@@ -272,6 +272,30 @@ describe("AtacadoRepository > buscarParceiroPorId — 404 → null", () => {
 		});
 		const repo = new AtacadoRepository(client);
 		await expect(repo.buscarParceiroPorId(1)).rejects.toBeInstanceOf(AtacadoError);
+	});
+});
+
+describe("AtacadoRepository > buscarClientesAtivosPorParceiro — 404 → []", () => {
+	it("retorna [] quando o Atacado responde 404 em list (nenhum cliente do parceiro)", async () => {
+		const { client } = mockClient({
+			list: async () => {
+				// NocoBase responde 404 quando o filtro não acha registros
+				throw new AtacadoError("Atacado 404", 404, "Not Found");
+			},
+		});
+		const repo = new AtacadoRepository(client);
+		const cs = await repo.buscarClientesAtivosPorParceiro(999);
+		expect(cs).toEqual([]);
+	});
+
+	it("propaga erro não-404 (ex.: 500)", async () => {
+		const { client } = mockClient({
+			list: async () => {
+				throw new AtacadoError("Atacado 500", 500, "boom");
+			},
+		});
+		const repo = new AtacadoRepository(client);
+		await expect(repo.buscarClientesAtivosPorParceiro(1)).rejects.toBeInstanceOf(AtacadoError);
 	});
 });
 

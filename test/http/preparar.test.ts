@@ -141,4 +141,35 @@ describe("executarPreparacao — contrato do handler (M7)", () => {
 		expect(resultado.status).toBe(201);
 		expect((resultado.corpo as { faturaId: number }).faturaId).toBe(101);
 	});
+
+	test("cria cobrança com f_descricao derivada dos itens + referência de mês", async () => {
+		const chamadas: unknown[] = [];
+		const atacado = fakeAtacado({
+			buscarFaturaPorChave: async () => null,
+			buscarParceiroPorId: async () => parceiroFixture(),
+			buscarClientesAtivosPorParceiro: async () => [clienteFixture()],
+			buscarPlanosDeServico: async () => [planoFixture()],
+			criarFatura: async () => ({ id: 101 }),
+			criarCobranca: async (_faturaId: never, input: never) => {
+				chamadas.push(input);
+				return { id: 456 };
+			},
+			criarNota: async () => ({ id: 7 }),
+			criarItem: async () => {},
+		});
+		const resultado = await executarPreparacao({ atacado }, BODY);
+		expect(resultado.status).toBe(201);
+		// Fixture: `clienteFixture()` tem 1 linha "Plano 100Mbps" (qtde 1, R$ 100,00)
+		// → descrição esperada deriva do item + referência de mês (Ago/2026).
+		// Input completo passado a criarCobranca (contrato da porta).
+		expect(chamadas[0]).toEqual({
+			descricao: "1x Plano 100Mbps = R$ 100,00\nAgo/2026",
+			valorTotal: 10000,
+			nomeDevedor: "Parceiro Ltda",
+			documentoDevedor: parceiroFixture().cnpj,
+			emailDevedor: "fin@parceiro.com",
+			status: "a-emitir",
+			dataVencimento: "2026-09-10",
+		});
+	});
 });

@@ -24,6 +24,12 @@ export function centsToReal(cents: number): number {
 	return cents / 100;
 }
 
+/** Centavos → string pt-BR (12345 → "123,45"), sem separador de milhar. Usada
+ * na montagem da descrição da cobrança (f_descricao) — exibe o total por item. */
+export function centsToRealStr(cents: number): string {
+	return (cents / 100).toFixed(2).replace(".", ",");
+}
+
 export function desmascararDoc(doc: string): string {
 	return doc.replace(/[.\-/\s]/g, "");
 }

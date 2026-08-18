@@ -37,20 +37,91 @@ describe("atacado.client · lazy env / injetável", () => {
 		// Se importasse env no top-level, este teste já teria falhado ao importar.
 		const f = fakeFetch({ status: 200, body: { id: 1 } });
 		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
-		await client.get("parceiros", { filterByTk: 1 });
+		await client.get("t_parceiros", { filterByTk: 1 });
 		const url = (f as unknown as ReturnType<typeof mock>).mock
 			.calls[0][0] as string;
-		expect(url).toContain("https://atacado.test/testapp/api/parceiros:get");
+		expect(url).toContain("https://atacado.test/t_parceiros:get");
 	});
 
-	it("envia o header Authorization: Bearer {apiKey}", async () => {
+	it("envia os headers Authorization: Bearer {apiKey} e X-App", async () => {
 		const f = fakeFetch({ status: 200, body: { id: 1 } });
 		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
-		await client.get("parceiros", { filterByTk: 1 });
+		await client.get("t_parceiros", { filterByTk: 1 });
 		const init = (f as unknown as ReturnType<typeof mock>).mock
 			.calls[0][1] as RequestInit;
 		const headers = init.headers as Record<string, string>;
 		expect(headers.Authorization).toBe("Bearer test-key");
+		expect(headers["X-App"]).toBe("testapp");
+	});
+
+	it("omite o header X-App quando app não é informado", async () => {
+		const f = fakeFetch({ status: 200, body: { id: 1 } });
+		const client = createAtacadoClient({
+			fetchImpl: f,
+			baseUrl: "https://atacado.test",
+			apiKey: "test-key",
+			app: "",
+		});
+		await client.get("t_parceiros", { filterByTk: 1 });
+		const init = (f as unknown as ReturnType<typeof mock>).mock
+			.calls[0][1] as RequestInit;
+		const headers = init.headers as Record<string, string>;
+		expect(headers["X-App"]).toBeUndefined();
+	});
+	it("get: extrai o registro do envelope NocoBase { data }", async () => {
+		const f = fakeFetch({
+			status: 200,
+			body: { data: { id: 17, f_razao_social: "Mateus" } },
+		});
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		const r = await client.get("t_parceiros", { filterByTk: 17 });
+		expect(r).toEqual({ id: 17, f_razao_social: "Mateus" });
+	});
+
+	it("create: extrai o registro do envelope NocoBase { data }", async () => {
+		const f = fakeFetch({
+			status: 200,
+			body: { data: { id: 99 } },
+		});
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		const r = await client.create("t_nfcom_faturas", { f_status: "a-emitir" });
+		expect(r).toEqual({ id: 99 });
+	});
+});
+
+describe("atacado.client · codificação de query (NocoBase)", () => {
+	/** NocoBase espera `appends` como CSV — `["a","b"]` (JSON) é lido como um
+	 * único nome de associação e rejeitado com "association ... not found".
+	 * `filter` (objeto) continua como JSON; primitivos como String. */
+	it("appends (array) → CSV separado por vírgulas", async () => {
+		const f = fakeFetch({ status: 200, body: { data: [] } });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await client.list("t_clientes", {
+			appends: ["f_linhas_fixas", "f_linhas_fixas.f_planos_de_servico"],
+		});
+		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		const params = new URL(url).searchParams;
+		expect(params.get("appends")).toBe(
+			"f_linhas_fixas,f_linhas_fixas.f_planos_de_servico",
+		);
+	});
+
+	it("filter (objeto) → JSON", async () => {
+		const f = fakeFetch({ status: 200, body: { data: [] } });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await client.list("t_clientes", { filter: { f_fk_parceiro: 10 } });
+		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		expect(new URL(url).searchParams.get("filter")).toBe(
+			JSON.stringify({ f_fk_parceiro: 10 }),
+		);
+	});
+
+	it("primitivo (number) → String, sem aspas", async () => {
+		const f = fakeFetch({ status: 200, body: { data: { id: 1 } } });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await client.get("t_parceiros", { filterByTk: 42 });
+		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		expect(new URL(url).searchParams.get("filterByTk")).toBe("42");
 	});
 });
 

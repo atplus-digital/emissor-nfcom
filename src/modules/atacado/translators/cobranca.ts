@@ -1,10 +1,45 @@
 /**
  * Translator Cobrança: domínio `Cobranca` ↔ `f_*` (t_nfcom_cobrancas) — ADR-0004.
+ *
+ * `f_descricao` é obrigatória no CRM e é **derivada** (a cobrança no domínio não
+ * tem texto): o caller (camada de persistência) passa a descrição montada a
+ * partir das notas/itens + referência de mês — ver `montarDescricaoCobranca`.
  */
-import type { Cobranca, StatusCobranca } from "#/domain/types";
+import type { Cobranca, Item, StatusCobranca } from "#/domain/types";
 import type { CriarCobrancaInput } from "#/domain/ports/atacado.port";
-import { centsToReal, desmascararDoc, realToCents } from "./money";
+import { centsToReal, centsToRealStr, desmascararDoc, realToCents } from "./money";
 import { notaToDomain, type NotaExterna } from "./nota";
+
+/** Abreviação pt-BR dos meses (0-indexada) — "Ago/2026". Espelha o que o app de
+ * referência fazia em `resolveMonthReference` (formatter de data). */
+const MESES_PT_BR = [
+	"Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+	"Jul", "Ago", "Set", "Out", "Nov", "Dez",
+] as const;
+
+/** `dataReferencia` YYYY-MM-01 → "Ago/2026" (operação pura de ano/mês). */
+export function mesDeDataReferencia(dataReferencia: string): string {
+	const parte = /^(\d{4})-(\d{2})/.exec(dataReferencia);
+	if (!parte) {
+		throw new Error(`dataReferencia inválida: ${dataReferencia} (esperado YYYY-MM-DD)`);
+	}
+	const [, ano, mes] = parte;
+	return `${MESES_PT_BR[Number(mes) - 1]}/${ano}`;
+}
+
+/** Monta a descrição exibida na cobrança: lista de itens (todas as notas) +
+ * referência de mês. Formato de cada item: `1x Voz Empresarial = R$ 99,90`.
+ * Espelha o app de referência (`itemsDescription\n${resolveMonthReference}`). */
+export function montarDescricaoCobranca(
+	itens: Item[],
+	dataReferencia: string,
+): string {
+	const linhas = itens.map(
+		(item) =>
+			`${item.quantidade}x ${item.descricao} = R$ ${centsToRealStr(item.total)}`,
+	);
+	return [...linhas, mesDeDataReferencia(dataReferencia)].join("\n");
+}
 
 export interface CobrancaExterna {
 	id: number;
@@ -23,6 +58,7 @@ export interface CobrancaExterna {
 
 export function cobrancaToCreate(input: CriarCobrancaInput): Record<string, unknown> {
 	return {
+		f_descricao: input.descricao,
 		f_valor_total: centsToReal(input.valorTotal),
 		f_nome_devedor: input.nomeDevedor,
 		f_documento_devedor: input.documentoDevedor,
