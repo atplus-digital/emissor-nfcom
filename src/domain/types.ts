@@ -25,7 +25,6 @@ export type TipoFaturamento =
 	| "cliente-final";
 
 export type StatusFatura =
-	| "criada"
 	| "a-emitir"
 	| "emitindo"
 	| "emitida"

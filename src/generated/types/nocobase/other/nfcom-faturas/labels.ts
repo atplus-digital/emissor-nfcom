@@ -30,7 +30,6 @@ export const NFCOM_FATURAS_FIELD_LABELS = {
 export const FIELD_LABELS = NFCOM_FATURAS_FIELD_LABELS;
 
 export const NFCOM_FATURAS_STATUS_LABELS = {
-	criada: "Criada",
 	"a-emitir": "A Emitir",
 	emitindo: "Emitindo",
 	emitida: "Fatura e NF Emitida",
@@ -56,20 +55,11 @@ export const ENUM_LABELS_BY_FIELD = {
 // ENUM SCHEMAS (validação em runtime)
 // ============================================================
 export const nfcom_faturasStatusSchema = z.enum(
-	[
-		"criada",
-		"a-emitir",
-		"emitindo",
-		"emitida",
-		"parcial",
-		"erro",
-		"pago",
-		"cancelada",
-	],
+	["a-emitir", "emitindo", "emitida", "parcial", "erro", "pago", "cancelada"],
 	{
 		error: () => ({
 			message:
-				"status: valores válidos são [Criada, A Emitir, Emitindo, Fatura e NF Emitida, Parcialmente Emitida, Erro ao emitir, Pago, Cancelada]",
+				"status: valores válidos são [A Emitir, Emitindo, Fatura e NF Emitida, Parcialmente Emitida, Erro ao emitir, Pago, Cancelada]",
 		}),
 	},
 );
