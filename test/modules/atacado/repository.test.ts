@@ -108,7 +108,9 @@ describe("AtacadoRepository > criação da árvore", () => {
 			dataVencimento: "2026-09-10",
 		});
 		expect(r).toEqual({ id: 456 });
-		expect(calls.create[0][1]).toMatchObject({ f_fk_fatura: 101, f_valor_total: 123.45 });
+		// NocoBase exige o nome da relação belongsTo (`f_fatura`), não a FK
+		// direta — `f_fk_fatura` é rejeitado com "Fatura is required".
+		expect(calls.create[0][1]).toMatchObject({ f_fatura: 101, f_valor_total: 123.45 });
 	});
 
 	it("criarNota: cria com f_fk_cobranca", async () => {
@@ -126,7 +128,8 @@ describe("AtacadoRepository > criação da árvore", () => {
 			total: 12345,
 		});
 		expect(r).toEqual({ id: 7 });
-		expect(calls.create[0][1]).toMatchObject({ f_fk_cobranca: 456 });
+		// NocoBase exige o nome da relação (`f_cobranca`), não a FK `f_fk_cobranca`.
+		expect(calls.create[0][1]).toMatchObject({ f_cobranca: 456 });
 	});
 
 	it("criarItem: cria na t_nfcom_itens", async () => {
@@ -146,7 +149,8 @@ describe("AtacadoRepository > criação da árvore", () => {
 			icms: 1798,
 			incideAliquota: true,
 		});
-		expect(calls.create[0][1]).toMatchObject({ f_fk_nota_fiscal: 7, f_cfop: "6102" });
+		// NocoBase: nome da relação (`f_nota_fiscal`), não a FK `f_fk_nota_fiscal`.
+		expect(calls.create[0][1]).toMatchObject({ f_nota_fiscal: 7, f_cfop: "6102" });
 	});
 });
 

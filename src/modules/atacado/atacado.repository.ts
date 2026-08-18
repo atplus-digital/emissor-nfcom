@@ -131,9 +131,13 @@ export class AtacadoRepository implements AtacadoPort {
 	}
 
 	async criarCobranca(faturaId: number, input: CriarCobrancaInput): Promise<{ id: number }> {
+		// NocoBase: a coleção filha valida `f_fatura is required` — enviar a FK
+		// direta (`f_fk_fatura`) é rejeitado; é preciso usar o **nome da relação**
+		// belongsTo (`f_fatura`), que o NocoBase resolve para a FK. Mesma regra
+		// aplica-se a criarNota (f_cobranca) e criarItem (f_nota_fiscal).
 		const created = await this.client.create(COL.cobrancas, {
 			...cobrancaToCreate(input),
-			f_fk_fatura: faturaId,
+			f_fatura: faturaId,
 		});
 		return { id: created.id as number };
 	}
@@ -141,7 +145,7 @@ export class AtacadoRepository implements AtacadoPort {
 	async criarNota(cobrancaId: number, input: CriarNotaInput): Promise<{ id: number }> {
 		const created = await this.client.create(COL.notas, {
 			...notaToCreate(input),
-			f_fk_cobranca: cobrancaId,
+			f_cobranca: cobrancaId,
 		});
 		return { id: created.id as number };
 	}
@@ -149,7 +153,7 @@ export class AtacadoRepository implements AtacadoPort {
 	async criarItem(notaId: number, input: CriarItemInput): Promise<void> {
 		await this.client.create(COL.itens, {
 			...itemToCreate(input),
-			f_fk_nota_fiscal: notaId,
+			f_nota_fiscal: notaId,
 		});
 	}
 
