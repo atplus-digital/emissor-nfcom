@@ -140,3 +140,37 @@ grep -rn "api/emitir\|api/auth\|nfcom.com.br" src/ | grep -v "src/modules/nfcom"
   é suportado pelo provedor: `DELETE /api/cancela?chave=&protocolo=` (retorna `xmlcanc` e
   `chavesub` na `NFCom`) — modelado em **SPEC-0003** (reservada no BACKLOG), fora do
   primeiro ciclo (somente emissão, SPEC-0001).
+
+### Contrato do provedor — cobertura e escopo (revisão swagger 2026-08-18)
+
+Revisão de aderência entre o swagger oficial (`api.nfcom.com.br/swagger/2.0/swagger.json`)
+e o módulo `nfcom`. O contrato tem **7 endpoints**; o primeiro ciclo implementa 3 e deixa 4
+documentados como escopo futuro (nenhum omissão indevida — coberto por SPEC):
+
+| Endpoint | Módulo `nfcom` | Status |
+| --- | --- | --- |
+| `POST /api/auth` | `auth` (client/repository, TTL 12h) | ✅ implementado |
+| `POST /api/emitir` | `emitir` (payload flat, `additionalProperties:false`) | ✅ implementado |
+| `GET /api/lista` | `consultaLista` (inspeção, SPEC-0001 caso 15) | ✅ implementado |
+| `POST /api/consulta` | — | ⏳ futuro (consulta por chave) |
+| `GET /api/seleciona` | — | ⏳ futuro (dados da nota) |
+| `POST /api/status` | — | ⏳ futuro (status SEFAZ) |
+| `DELETE /api/cancela` | — | 📌 SPEC-0003 (BACKLOG) |
+
+**Decisões registradas nesta revisão:**
+
+- **Ambiente (produção/homologação) NÃO é selecionável por nota.** O payload de emissão
+  `ApiNFComEmitir` não tem campo `ambiente` (e é `additionalProperties:false` — campo extra
+  é rejeitado). A seleção de ambiente é **por base URL** (`env.NFCOM_API_URL`), global, não
+  por nota. O campo `ambiente` (integer) existe apenas no **response** `NFCom` — o app o
+  lê e persiste em `f_ambiente` p/ auditoria, mas não o controla no pedido.
+- **`qrcodepix`/`mensagem` (request) e `codigobarras`/`linhadigitavel` (response):** campos
+  aceitos pelo gateway mas **não utilizados** no primeiro ciclo. O `pix` do response `NFCom`
+  (campo distinto de `qrcodepix`) é lido e persistido em `f_qrcodepix`. Se um dia a nota
+  precisar levar `mensagem`/`qrcodepix` explícito no pedido ou expor código de barras/linha
+  digitável, é adição localizada no translator (sem mudança de contrato do app).
+- **Campos de identificação do response `NFCom` são `[opt]`** (numero/serie/chave/protocolo)
+  — podem vir ausentes em situações não-autorizadas (ex.: `REJEITADA` antes de gerar chave).
+  O contrato do domínio (`EmitirNFComResultado`) os tipa como opcionais e o worker só resolve
+  a idempotency key com a chave SEFAZ presente; a proteção anti-duplicação segue no sentinel
+  e no retry controlado do BullMQ.

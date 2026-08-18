@@ -1,12 +1,12 @@
 /**
  * Porta do módulo NFCom (gateway SEFAZ — ADR-0001).
  *
- * Gateway SaaS `api.nfcom.com.br` (Vigo, OpenAPI 3.0.4). Auth `POST /api/auth`
- * (login/senha → bearer, **TTL 12h**) com cache no módulo. `ApiNFComEmitir` é
- * `additionalProperties: false` — **não há campo de referência própria** na
- * emissão (ao contrário do boleto Asaas), logo o input NÃO leva
- * `externalReference`. Lookups só por `chave` (44 dígitos) ou `/api/lista`
- * por `cpfcnpj`+janela de data (SPEC-0001 caso 15 — inspeção manual).
+ * Porta de domínio para o gateway SEFAZ — o provedor e seus endpoints ficam
+ * isolados em `src/modules/nfcom` (ADR-0001). Auth com bearer token (TTL 12h,
+ * cache no módulo). A emissão não tem campo de referência própria — o input
+ * NÃO leva `externalReference` (schemas do gateway podem ser
+ * `additionalProperties: false`). Lookups por chave ou por cpfcnpj+janela de
+ * data (SPEC-0001 caso 15 — inspeção manual).
  *
  * `situacao` chega em uppercase do gateway; a ACL **normaliza p/ lowercase**
  * ao traduzir para `SituacaoNota`.
@@ -36,13 +36,18 @@ export interface EmitirNFComInput {
 
 export interface EmitirNFComResultado {
 	situacao: SituacaoNota;
-	numero: number;
-	serie: number;
-	chave: string;
-	protocolo: string;
+	/** Identificação `[opt]` no swagger — ausente em situações não-autorizadas. */
+	numero?: number;
+	serie?: number;
+	chave?: string;
+	protocolo?: string;
+	/** Ambiente SEFAZ da emissão (integer — produção/homologação). */
+	ambiente?: number;
+	/** QR Code Pix da nota (campo `pix` do response `NFCom`). */
+	pixUrl?: string;
 	/** URLs ficam no gateway — o app persiste só as URLs (SPEC-0001). */
-	pdfUrl: string;
-	xmlUrl: string;
+	pdfUrl?: string;
+	xmlUrl?: string;
 }
 
 export interface NFComListaItem {
@@ -62,7 +67,7 @@ export interface NfcomPort {
 	 */
 	consultarLista(
 		cpfcnpj: string,
-		dataInicio: string,
-		dataFim: string,
+		inicio: string,
+		fim: string,
 	): Promise<NFComListaItem[]>;
 }

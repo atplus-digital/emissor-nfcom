@@ -1,10 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-08-14
 builds-on: [ADR-0004]
-superseded-by: null
+superseded-by: ADR-0010
 deciders: [gugacarbo]
 ---
+
+> ⚠️ VERDADE ATUAL: `src/generated/` segue sendo output do gerador (`bun run
+> generate:types`), nunca editado à mão (intacto). Supersedido por ADR-0010 em
+> 2026-08-18 quanto aos **shapes de translators** (`*Externo`/`*Gateway`): ficam
+> hand-written, confinados a `modules/<integração>/translators/` (ADR-0004).
 
 # Tipos de CRM/Atacado/IXC sempre gerados por script, nunca escritos à mão
 

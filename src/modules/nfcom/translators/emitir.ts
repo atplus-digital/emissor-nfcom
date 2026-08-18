@@ -52,15 +52,28 @@ export interface ApiNFComEmitir {
 	itens: ItemGateway[];
 }
 
-/** Resposta `NFCom` do gateway (campos relevantes). */
+/** Resposta `NFCom` do gateway (campos relevantes).
+ *
+ * Swagger verificado (ADR-0001): `/api/emitir` retorna `NFCom`, onde os campos
+ * de identificação são **opcionais** (`[opt]`) — podem vir ausentes em situações
+ * não-autorizadas (ex.: `REJEITADA` antes de gerar chave). Por isso o contrato
+ * os tipa como condicionais e o translator passa preservando a ausência em vez
+ * de assumir presença. `pix` e `ambiente` também são `[opt]` — o primeiro é o
+ * QR/Pix da nota emitida (antigo gap identificado na revisão), o segundo indica
+ * o ambiente SEFAZ (produção/homologação) da emissão.
+ */
 export interface NFComResposta {
 	situacao: string;
-	numero: number;
-	serie: number;
-	chave: string;
-	protocolo: string;
-	pdf: string;
-	xml: string;
+	numero?: number;
+	serie?: number;
+	chave?: string;
+	protocolo?: string;
+	/** Ambiente SEFAZ da emissão (integer no swagger — produção/homologação). */
+	ambiente?: number;
+	/** QR Code Pix da nota (campo `pix` do response `NFCom`). */
+	pix?: string;
+	pdf?: string;
+	xml?: string;
 }
 
 /** Converte centavos (domínio, inteiro) para reais (gateway, decimal) — ADR-0004. */
@@ -97,7 +110,13 @@ export function montarPayloadEmitir(input: EmitirNFComInput): ApiNFComEmitir {
 	};
 }
 
-/** Traduz a resposta `NFCom` do gateway para `EmitirNFComResultado` (domínio). */
+/** Traduz a resposta `NFCom` do gateway para `EmitirNFComResultado` (domínio).
+ *
+ * Campos de identificação (numero/serie/chave/protocolo) são `[opt]` no
+ * swagger — o translator os repassa como `undefined` quando ausentes, não
+ * assume um valor (quem persiste decide como gravar). `pdf`/`xml`/`pix`/`ambiente`
+ * são mapeados de forma análoga (camelCase + domínio).
+ */
 export function traduzirResultadoEmitir(
 	resposta: NFComResposta,
 ): EmitirNFComResultado {
@@ -107,6 +126,8 @@ export function traduzirResultadoEmitir(
 		serie: resposta.serie,
 		chave: resposta.chave,
 		protocolo: resposta.protocolo,
+		ambiente: resposta.ambiente,
+		pixUrl: resposta.pix,
 		pdfUrl: resposta.pdf,
 		xmlUrl: resposta.xml,
 	};

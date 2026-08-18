@@ -65,11 +65,11 @@
     "path": "docs/adr/0006-tipos-de-crm-gerados-por-script.md",
     "layer": "adr",
     "title": "Tipos de CRM/Atacado/IXC sempre gerados por script, nunca escritos à mão",
-    "status": "accepted",
+    "status": "superseded",
     "builds-on": [
       "ADR-0004"
     ],
-    "superseded-by": null,
+    "superseded-by": "ADR-0010",
     "implemented-by": []
   },
   {
@@ -109,6 +109,19 @@
     "builds-on": [
       "ADR-0003",
       "ADR-0005"
+    ],
+    "superseded-by": null,
+    "implemented-by": []
+  },
+  {
+    "id": "ADR-0010",
+    "path": "docs/adr/0010-supersede-0006-tipos-translators-hand-written.md",
+    "layer": "adr",
+    "title": "Regra do ADR-0006 supersedida para tipos de translators: shapes hand-written são exceção documentada",
+    "status": "accepted",
+    "builds-on": [
+      "ADR-0006",
+      "ADR-0004"
     ],
     "superseded-by": null,
     "implemented-by": []
