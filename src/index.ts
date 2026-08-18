@@ -146,3 +146,4 @@ main().catch((err) => {
 	log.error({ err }, "erro fatal no boot");
 	process.exit(1);
 });
+

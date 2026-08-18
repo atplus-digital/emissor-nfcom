@@ -156,13 +156,19 @@ export async function handleWebhookSend(
 export async function criarWebhookWorker(
 	deps: WebhookWorkerDeps,
 ): Promise<import("bullmq").Worker> {
-	const [{ Worker }, { getQueue }, { QUEUE_NAMES }] = await Promise.all([
+	const [{ Worker }, { getRedis }, { QUEUE_NAMES }] = await Promise.all([
 		import("bullmq"),
-		import("#/lib/queues"),
+		import("#/lib/redis"),
 		import("#/lib/queue-names"),
 	]);
-	return new Worker(QUEUE_NAMES.WEBHOOK, async (job: Job) =>
-		handleWebhookSend(job, deps),
+	// `connection: getRedis()` — mesma conexão ioredis compartilhada dos demais
+	// workers (emissao/outbox). Sem isso o BullMQ cria uma conexão própria que,
+	// com `lazyConnect`, ainda não está pronta e o construtor rejeita com
+	// "Worker requires a connection".
+	return new Worker(
+		QUEUE_NAMES.WEBHOOK,
+		async (job: Job) => handleWebhookSend(job, deps),
+		{ connection: getRedis() },
 	);
 }
 
