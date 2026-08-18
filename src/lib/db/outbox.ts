@@ -88,6 +88,17 @@ export async function markOutboxDone(db: DB, id: number): Promise<void> {
 }
 
 /**
+ * Marca uma mensagem outbox como `failed` (estado terminal, m4 poison guard).
+ * `status` é texto livre no schema (sem CHECK constraint), então `failed` não
+ * exige migration. `drainOutbox` só reivindica `pending`, logo uma row `failed`
+ * nunca volta ao ciclo — evita poison message (falha permanente repropagando a
+ * cada 5s).
+ */
+export async function markOutboxFailed(db: DB, id: number): Promise<void> {
+	await db.update(outbox).set({ status: "failed" }).where(eq(outbox.id, id));
+}
+
+/**
  * Incrementa o contador de tentativas e **devolve a row a `pending`** (para retry).
  */
 export async function incOutboxAttempts(db: DB, id: number): Promise<void> {

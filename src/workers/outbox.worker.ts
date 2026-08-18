@@ -16,6 +16,7 @@ import type { AtacadoPort } from "#/domain/ports/atacado.port";
 import {
 	drainOutbox,
 	markOutboxDone,
+	markOutboxFailed,
 	incOutboxAttempts,
 	type OutboxRow,
 } from "#/lib/db/outbox";
@@ -23,6 +24,13 @@ import { log, runWithLogContext } from "#/lib/logger";
 import { QUEUE_NAMES, JOB_NAMES } from "#/lib/queue-names";
 
 /** DB de coordenação — alinhado ao tipo aceito pelos helpers de outbox. */
+
+/**
+ * Nº máximo de tentativas de entrega antes de marcar a linha como `failed`
+ * (m4 — poison guard). Acima disso a linha é terminal: não repropaga a cada
+ * ciclo do relay (5s) e não é re-drenada.
+ */
+export const MAX_OUTBOX_ATTEMPTS = 10;
 
 /**
  * Payload do outbox: discriminação por `op` (flat). **Deve casar exatamente**
@@ -47,8 +55,12 @@ export type OutboxPayload =
 			serie?: number;
 			chave?: string;
 			protocolo?: string;
+			/** Ambiente SEFAZ da emissão (produção/homologação). */
+			ambiente?: number;
 			pdfUrl?: string;
 			xmlUrl?: string;
+			/** QR Code Pix da nota (campo `pix` do response `NFCom`). */
+			pixUrl?: string;
 	  }
 	| {
 			op: "registrarErro";
@@ -86,7 +98,19 @@ export async function despacharOutbox(
 			);
 			return;
 		case "atualizarStatusNota": {
-			const { id, statusInterno, situacao, numero, serie, chave, protocolo, pdfUrl, xmlUrl } = payload;
+			const {
+				id,
+				statusInterno,
+				situacao,
+				numero,
+				serie,
+				chave,
+				protocolo,
+				ambiente,
+				pdfUrl,
+				xmlUrl,
+				pixUrl,
+			} = payload;
 			await atacado.atualizarStatusNota(id, {
 				statusInterno: statusInterno as Parameters<AtacadoPort["atualizarStatusNota"]>[1]["statusInterno"],
 				situacao: situacao as Parameters<AtacadoPort["atualizarStatusNota"]>[1]["situacao"],
@@ -94,8 +118,10 @@ export async function despacharOutbox(
 				serie,
 				chave,
 				protocolo,
+				ambiente,
 				pdfUrl,
 				xmlUrl,
+				pixUrl,
 			});
 			return;
 		}
@@ -144,6 +170,11 @@ export async function entregarLinha(
  * entregues com sucesso. Em falha numa linha, para de processar o batch e
  * repropaga (mantém as restantes pending) — BullMQ retenta o batch inteiro.
  * Entrega na ordem por id (mais antiga primeiro, via drainOutbox).
+ *
+ * Poison guard (m4): uma linha com `attempts >= MAX_OUTBOX_ATTEMPTS` é
+ * **falha permanente** — em vez de repropagar a cada ciclo (poison message),
+ * marca `failed` (estado terminal), loga `error` e segue para a próxima linha
+ * (não bloqueia o resto do batch). At-least-once preservado para attempts < MAX.
  */
 export async function drenarEEntregar(
 	db: CoordDB,
@@ -153,6 +184,14 @@ export async function drenarEEntregar(
 	const rows = await drainOutbox(db, limit);
 	let entregues = 0;
 	for (const row of rows) {
+		if (row.attempts >= MAX_OUTBOX_ATTEMPTS) {
+			await markOutboxFailed(db, row.id);
+			log.error(
+				{ outboxId: row.id, aggregate: row.aggregate, attempts: row.attempts },
+				"outbox: falha permanente — marcada como failed (poison guard, sem mais retries)",
+			);
+			continue;
+		}
 		await entregarLinha(db, atacado, row); // lança em falha → aborta o batch
 		entregues++;
 	}
@@ -168,17 +207,22 @@ export interface OutboxWorkerDeps {
 /**
  * Handler puro para o job `outbox-relay` (testável sem BullMQ real). Em produção
  * é registrado num Worker da fila `outbox` (criarOutboxWorker).
+ *
+ * Popula o ALS (ADR-0008) com `fila` + `jobId` para que todo log de
+ * `drenarEEntregar`/`entregarLinha` herde o contexto de correlação via mixin.
  */
 export async function handleOutboxRelay(
-	_job: { data?: unknown },
+	job: { id?: string; data?: unknown },
 	deps: OutboxWorkerDeps,
 ): Promise<{ entregues: number }> {
 	const db = deps.db;
 	if (!db) {
 		throw new Error("handleOutboxRelay: db não injetado (composition root faltante)");
 	}
-	const entregues = await drenarEEntregar(db, deps.atacado, 100);
-	return { entregues };
+	return runWithLogContext({ fila: "outbox", jobId: job.id ?? "" }, async () => {
+		const entregues = await drenarEEntregar(db, deps.atacado, 100);
+		return { entregues };
+	});
 }
 
 /**
@@ -209,7 +253,17 @@ export function criarOutboxWorker(deps: OutboxWorkerDeps): {
 			QUEUE_NAMES.OUTBOX,
 			async (job) => {
 				if (job.name === JOB_NAMES.OUTBOX_RELAY) {
-					await handleOutboxRelay(job, deps);
+					try {
+						await handleOutboxRelay(job, deps);
+					} catch (err) {
+						// ADR-0008: o erro final é logado UMA vez com fila+jobId; o
+						// BullMQ fica responsável pelo retry (at-least-once).
+						log.error(
+							{ err, fila: "outbox", jobId: job.id ?? "" },
+							"job outbox-relay falhou (BullMQ retenta)",
+						);
+						throw err; // deixa o BullMQ retryar
+					}
 				}
 			},
 			{ connection: getRedis() },

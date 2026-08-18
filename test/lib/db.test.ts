@@ -16,6 +16,7 @@ import {
 	enqueueOutbox,
 	drainOutbox,
 	markOutboxDone,
+	markOutboxFailed,
 	incOutboxAttempts,
 } from "#/lib/db/outbox";
 import { acquireLease, releaseLease, hasLease } from "#/lib/db/lease";
@@ -148,6 +149,14 @@ describe("outbox: enqueue / drain / markDone / incAttempts", () => {
 		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 1, payload: {} });
 		const pending = await drainOutbox(db, 10);
 		await markOutboxDone(db, pending[0].id);
+		const next = await drainOutbox(db, 10);
+		expect(next.length).toBe(0);
+	});
+
+	test("m4: markOutboxFailed → status failed → não retorna no próximo drain (estado terminal)", async () => {
+		await enqueueOutbox(db, { aggregate: "fatura", aggregateId: 1, payload: {} });
+		const claimed = await drainOutbox(db, 10); // → processing
+		await markOutboxFailed(db, claimed[0].id);
 		const next = await drainOutbox(db, 10);
 		expect(next.length).toBe(0);
 	});

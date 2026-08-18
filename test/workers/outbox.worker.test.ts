@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { rmSync, mkdirSync } from "node:fs";
@@ -13,6 +14,7 @@ import {
 	despacharOutbox,
 	entregarLinha,
 	drenarEEntregar,
+	MAX_OUTBOX_ATTEMPTS,
 	type OutboxPayload,
 } from "#/workers/outbox.worker";
 
@@ -204,6 +206,44 @@ describe("outbox.worker — drenarEEntregar", () => {
 		await entregarLinha(db, atacado, row);
 		await entregarLinha(db, atacado, row); // replay (at-least-once)
 		expect(atacado.calls.length).toBe(2);
+	});
+
+	test("m4: linha com attempts >= MAX é marcada failed (poison guard) — não repropaga nem re-drena", async () => {
+		const atacado = fakeAtacado();
+		(atacado.atualizarStatusFatura as any) = async () => {
+			throw new Error("Atacado permanentemente fora");
+		};
+		await enqueueOutbox(db, {
+			aggregate: "fatura", aggregateId: 1,
+			payload: { op: "atualizarStatusFatura", id: 1, status: "emitindo" },
+		});
+		// Simula uma linha que já estourou o nº máximo de tentativas (falha permanente).
+		await db.run(
+			sql`UPDATE outbox SET attempts = ${MAX_OUTBOX_ATTEMPTS}, status = 'pending' WHERE aggregate_id = 1`,
+		);
+		const entregues = await drenarEEntregar(db, atacado, 10);
+		expect(entregues).toBe(0); // não tentou entregar (guard disparou antes)
+		expect(atacado.calls.length).toBe(0);
+		const rest = await drainOutbox(db, 10);
+		expect(rest).toEqual([]); // failed é terminal — não é re-drenada
+	});
+
+	test("m4: linha com attempts < MAX continua tentando (at-least-once) até o teto", async () => {
+		const atacado = fakeAtacado();
+		(atacado.atualizarStatusFatura as any) = async () => {
+			throw new Error("Atacado fora (transitório)");
+		};
+		await enqueueOutbox(db, {
+			aggregate: "fatura", aggregateId: 1,
+			payload: { op: "atualizarStatusFatura", id: 1, status: "emitindo" },
+		});
+		// attempts = MAX - 1: ainda abaixo do teto → deve tentar e incrementar.
+		await db.run(
+			sql`UPDATE outbox SET attempts = ${MAX_OUTBOX_ATTEMPTS - 1}, status = 'pending' WHERE aggregate_id = 1`,
+		);
+		await expect(drenarEEntregar(db, atacado, 10)).rejects.toThrow("Atacado fora");
+		const [row] = await drainOutbox(db, 10);
+		expect(row.attempts).toBe(MAX_OUTBOX_ATTEMPTS); // incOutboxAttempts
 	});
 });
 
