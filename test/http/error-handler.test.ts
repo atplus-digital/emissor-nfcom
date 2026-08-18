@@ -58,6 +58,35 @@ describe("errorHandler", () => {
 		expect(body.erro.mensagem).not.toContain("boom interno");
 	});
 
+	it("Logger debug → 500 ERRO_INTERNO detalha mensagem + stack no envelope", async () => {
+		const app = new Hono();
+		app.get("*", () => {
+			throw new Error("boom interno");
+		});
+		app.onError(errorHandler({ debug: true }));
+		const res = await app.request("/x");
+		expect(res.status).toBe(500);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("ERRO_INTERNO");
+		// Com debug, o detalhe do ERRO_INTERNO carrega a mensagem original + stack.
+		expect(body.erro.detalhe.mensagem).toBe("boom interno");
+		expect(typeof body.erro.detalhe.stack).toBe("string");
+		expect(body.erro.detalhe.stack.length).toBeGreaterThan(0);
+	});
+
+	it("Logger debug (default off) não muda o envelope de HttpError", async () => {
+		const app = new Hono();
+		app.get("*", () => {
+			throw new HttpError(TipoErro.CONFLITO, "emissão em curso", { faturaId: 1 });
+		});
+		app.onError(errorHandler({ debug: true }));
+		const res = await app.request("/x");
+		expect(res.status).toBe(409);
+		// HttpError mantém o detalhe que carrega; debug não injeta stack extra.
+		const body = await res.json();
+		expect(body.erro.detalhe).toEqual({ faturaId: 1 });
+	});
+
 	it("loga o erro UMA vez com tipo + status", async () => {
 		const logged: object[] = [];
 		const app = mkApp(() => {

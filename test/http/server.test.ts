@@ -1,6 +1,8 @@
 import { describe, expect, mock, it } from "bun:test";
 import { Hono } from "hono";
 import { criarApp } from "#/http/server";
+import { requestLogMiddleware } from "#/http/middlewares/request-log";
+import { errorHandler } from "#/http/middlewares/error-handler";
 import type { AtacadoPort, QueuePort } from "#/domain/ports";
 
 const fakeAtacado = {} as AtacadoPort;
@@ -51,5 +53,22 @@ describe("criarApp (composition)", () => {
 		expect(res.status).toBe(422);
 		const body = await res.json();
 		expect(body.erro.tipo).toBe("VALIDACAO");
+	});
+
+	it("logLevel debug liga o detalhe de ERRO_INTERNO na resposta", async () => {
+		const app = new Hono();
+		app.use("*", requestLogMiddleware());
+		app.onError(errorHandler({ debug: true }));
+		// Rota protegida — sem api key deve 401 antes de qualquer erro interno;
+		// o handler é o canônico e o debug entra pelo error-handler (default off).
+		app.get("*", () => {
+			throw new Error("boom-rota");
+		});
+		const res = await app.request("/x");
+		expect(res.status).toBe(500);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("ERRO_INTERNO");
+		expect(body.erro.detalhe.mensagem).toBe("boom-rota");
+		expect(typeof body.erro.detalhe.stack).toBe("string");
 	});
 });

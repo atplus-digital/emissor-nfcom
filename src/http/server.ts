@@ -28,6 +28,12 @@ export interface AppDeps {
 	defaultsFiscais?: DefaultsFiscais;
 	/** DB de coordenação p/ o ping do /health (ADR-0002). Injete ou omita p/ liveness puro. */
 	db?: CoordDB;
+	/**
+	 * Nível de log do app (env.LOG_LEVEL). `debug`/`trace` ligam o detalhe de
+	 * `ERRO_INTERNO` na resposta de erro (mensagem + stack) — diagnóstico sem
+	 * exposição em produção (default off, nível info).
+	 */
+	logLevel?: string;
 }
 
 /**
@@ -37,9 +43,12 @@ export function criarApp(deps: AppDeps): Hono {
 	const app = new Hono();
 
 	// Middlewares globais (ordem importa): request-log primeiro (popula ALS),
-	// depois api-key, depois error-handler (onError).
+	// depois api-key, depois error-handler (onError). O debug (LOG_LEVEL) liga o
+	// detalhe de ERRO_INTERNO na resposta — ver error-handler.ts.
 	app.use("*", requestLogMiddleware());
-	app.onError(errorHandler());
+	const logLevel = deps.logLevel;
+	const debugErro = logLevel === "debug" || logLevel === "trace";
+	app.onError(errorHandler({ debug: debugErro }));
 
 	// Health é público (liveness — não exige auth; ADR-0002). O ping do SQLite é
 	// ligado quando o composition root injeta o `db`; senão liveness puro.

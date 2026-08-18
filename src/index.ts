@@ -36,6 +36,12 @@ import type { EventoWebhook } from "#/domain/types";
 
 async function main() {
 	await runWithLogContext({ fila: "boot" }, async () => {
+		// Nível do logger real (ADR-0008): o singleton nasce em `info`; o composition
+		// root aplica env.LOG_LEVEL. `debug`/`trace` também ligam o detalhe de
+		// ERRO_INTERNO na resposta HTTP (error-handler, abaixo).
+		log.level = env.LOG_LEVEL;
+		log.debug({ nivel: env.LOG_LEVEL }, "LOG_LEVEL aplicado ao logger");
+
 		log.info({ port: env.PORT }, "iniciando emissor-nfcom");
 
 		// 1. DB de coordenação + migrate (idempotente, ADR-0009).
@@ -100,6 +106,8 @@ async function main() {
 				cclass: env.FISCAL_CCLASS_DEFAULT,
 				aliqIcms: env.FISCAL_ICMS_ALIQUOTA,
 			},
+			// LOG_LEVEL=debug/trace → detalhe de ERRO_INTERNO na resposta (diagnóstico).
+			logLevel: env.LOG_LEVEL,
 		});
 
 		// 6. Workers (mesmo processo, single-instance — ADR-0002).
@@ -146,4 +154,5 @@ main().catch((err) => {
 	log.error({ err }, "erro fatal no boot");
 	process.exit(1);
 });
+
 
