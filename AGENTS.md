@@ -40,6 +40,9 @@ cp .env.example .env            # preencher keys (Asaas, NFCom, Atacado...)
 bun install
 bun run dev     # docker compose up: Redis + app (Hono :3000 + workers, bun --watch)
                 # — migra o SQLite de coordenação no boot (drizzle-kit migrate)
+                # — sobe também o serviço `tunnel` (cloudflared): preview público
+                #   em https://<id>.trycloudflare.com (URL nos logs do serviço)
+# URL do preview: docker compose logs tunnel | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1
 # Sem Docker: bun dev:native (Redis à parte; requer bunx drizzle-kit migrate)
 ```
 

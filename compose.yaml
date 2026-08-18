@@ -1,6 +1,6 @@
-# Dev local: sobe Redis + app (com hot-reload via `bun --watch`) num único pod.
-# `bun dev` roda `docker compose up`. Produção usa só o Dockerfile (bundle
-# autocontido); este compose é tooling de desenvolvimento.
+# Dev local: sobe Redis + app (com hot-reload via `bun --watch`) + tunnel Cloudflare
+# (preview URL pública) num único pod. `bun dev` roda `docker compose up`. Produção
+# usa só o Dockerfile (bundle autocontido); este compose é tooling de desenvolvimento.
 #
 # Single-instance (ADR-0002/0003): NÃO escalar réplicas — o SQLite de coordenação
 # (/app/data) não é compartilhável entre pods.
@@ -35,6 +35,11 @@ services:
       # 4649). Forçamos 3000 para bater com o port map `3000:3000` abaixo e com
       # o EXPOSE 3000 do Dockerfile — o host alcança a API em localhost:3000.
       PORT: "3000"
+      # SQLite de coordenação num VOLUME nomeado (não no bind mount do source).
+      # Se ficasse em ./data (dentro de ./:/app), o `bun --watch` veria cada
+      # escrita no DB (migrate, outbox, lease) como mudança de arquivo e
+      # recarregaria o app num loop. Caminho idêntico ao do Dockerfile de prod.
+      DATABASE_URL: "/app/data/emissor.db"
       NODE_ENV: development
     ports:
       - "3000:3000"
@@ -43,12 +48,43 @@ services:
       - ./:/app
       # Preserva o node_modules da imagem (bind mount não o sobrescreve).
       - /app/node_modules
+      # SQLite de coordenação ISOLADO do bind mount do source — volume nomeado.
+      # Sem isso, escritas no DB disparariam reload do `bun --watch` (loop).
+      - db-data:/app/data
     depends_on:
       redis:
         condition: service_healthy
     # Migra o SQLite de coordenação (idempotente, ADR-0009) antes de subir o
     # server — espelha o CMD do Dockerfile de produção.
-    command: sh -c "mkdir -p data && bunx drizzle-kit migrate && bun --watch src/index.ts"
+    #
+    # Roda como root só p/ dar ao volume nomeado /app/data (que o Docker cria
+    # como root) ownership do `bun` (UID 1000); depois cai p/ `bun` via `su` p/
+    # rodar o app sem root. O `bun --watch` enxerga só o source (bind mount) —
+    # o DB vive no volume nomeado, isolado do watch (sem loop de reload).
+    user: "0:0"
+    command: sh -c "mkdir -p /app/data && chown -R 1000:1000 /app/data && su bun -c 'cd /app && bunx drizzle-kit migrate && bun --watch src/index.ts'"
+    # Healthcheck no /health (rota pública de liveness, ADR-0002) — o serviço
+    # `tunnel` depende dele p/ só abrir o preview após o app responder.
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  # Tunnel Cloudflare (quick tunnel, URL efêmera https://<id>.trycloudflare.com)
+  # que expõe o dev-server publicamente — útil p/ compartilhar o preview com
+  # stakeholders ou receber webhooks externos. Sem login/conta/certificado: a URL
+  # é gerada a cada `bun dev` e aparece nos logs deste serviço. `docker compose
+  # down` derruba o tunnel junto com o pod — sem processos órfãos no host.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --url http://app:3000 --no-autoupdate
+    depends_on:
+      app:
+        condition: service_healthy
 
 volumes:
   redis-data:
+  db-data:

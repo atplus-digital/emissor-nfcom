@@ -1,0 +1,97 @@
+# Smoke test do emissor-nfcom (Hono :3000)
+#
+# Rotas exercitadas (SPEC-0001/SPEC-0002):
+#   GET  /health                liveness + ping do SQLite de coordenação (público)
+#   POST /faturas/preparar      prepara fatura (síncrono) — 201 criação / 200 atualização
+#   POST /faturas/:id/emitir    enfileira emissão (BullMQ) — 202 + jobId
+#   GET  /faturas/:id/emissao   fallback de status de emissão (SPEC-0001 passo 7)
+#
+# Auth: header X-API-Key contra EMISSOR_API_KEY (CONVENTIONS · Autorização).
+# Erro no envelope canônico: { "erro": { "tipo", "mensagem", "detalhe" } }.
+#
+# Uso: rodar o app (`bun run dev`), preencher .env, e executar no REST Client
+# (VS Code, humao.rest-client). As variáveis vêm do .env via {{$dotenv ...}}.
+# Ajuste PARCEIRO_ID e DATA_REFERENCIA para dados reais de homologação.
+
+@baseUrl = http://100.81.99.14:{{$dotenv PORT}}
+@apiKey = {{$dotenv EMISSOR_API_KEY}}
+
+# Parceiro (cliente) real do NocoBase e data de referência a faturar.
+@parceiroId = 17
+@dataReferencia = 2026-08-01
+
+# ============================================================
+# Health (público — sem API key)
+# ============================================================
+
+### GET /health — processo de pé + SQLite de coordenação respondendo (200)
+# Sem API key: liveness não exige auth (ADR-0002). 503 se o DB de coordenação cair.
+GET {{baseUrl}}/health
+Accept: application/json
+
+# ============================================================
+# Preparação (X-API-Key)
+# ============================================================
+
+### POST /faturas/preparar — cria a fatura (201)
+# Síncrono (SPEC-0002): calcula a árvore fatura → cobranças → notas → itens.
+# Idempotente por chave natural (parceiroId + dataReferencia): re-POST → 200
+# (atualização) se ainda a-emitir; 409 se já entrou na emissão.
+# @name prepararFatura
+POST {{baseUrl}}/faturas/preparar
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "parceiroId": {{parceiroId}},
+  "dataReferencia": "{{dataReferencia}}",
+  "tipoFaturamento": "parceiro"
+}
+
+# --- Casos de erro da preparação (para conferir o envelope) ---
+
+### POST /faturas/preparar — body inválido → 422 VALIDACAO
+POST {{baseUrl}}/faturas/preparar
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "parceiroId": "nao-e-numero",
+  "dataReferencia": "01/08/2026",
+  "tipoFaturamento": "invalido"
+}
+
+### POST /faturas/preparar — sem X-API-Key → 401 NAO_AUTORIZADO
+POST {{baseUrl}}/faturas/preparar
+Content-Type: application/json
+
+{
+  "parceiroId": {{parceiroId}},
+  "dataReferencia": "{{dataReferencia}}",
+  "tipoFaturamento": "parceiro"
+}
+
+# ============================================================
+# Emissão (usa o id da preparação acima)
+# ============================================================
+
+### POST /faturas/:id/emitir — enfileira a emissão (202 + jobId)
+# Assíncrono (ADR-0002): o worker BullMQ roda a emissão em background.
+# 409 se já emitindo/emitida; 422 se soma das cobranças ≠ total ou nota sem a-emitir.
+# @name emitirFatura
+POST {{baseUrl}}/faturas/{{prepararFatura.response.body.faturaId}}/emitir
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+### GET /faturas/:id/emissao — fallback de status de emissão (200)
+# Acompanha a emissão quando não há webhook configurado (SPEC-0001 passo 7).
+GET {{baseUrl}}/faturas/{{prepararFatura.response.body.faturaId}}/emissao
+Accept: application/json
+X-API-Key: {{apiKey}}
+
+# --- Caso de erro da emissão ---
+
+### GET /faturas/:id/emissao — id inexistente → 404 NAO_ENCONTRADO
+GET {{baseUrl}}/faturas/99999999/emissao
+Accept: application/json
+X-API-Key: {{apiKey}}

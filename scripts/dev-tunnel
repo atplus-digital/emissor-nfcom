@@ -1,0 +1,101 @@
+#!/usr/bin/env sh
+# dev-tunnel — sobe um tunnel Cloudflare (quick tunnel, URL automática) apontando
+# para o dev-server local (http://localhost:3000) e mostra a URL pública de preview.
+#
+# CAMINHO PRIMÁRIO: o serviço `tunnel` no compose.yaml já abre o tunnel junto com
+# `bun dev` (URL nos logs do serviço). ESTE script é a alternativa manual p/ abrir
+# um tunnel sob demanda SEM reiniciar o pod — útil quando o pod já está rodando e
+# você só quer expor o preview temporariamente.
+#
+# Sem necessidade de conta/login ou certificados — `cloudflared tunnel --url` gera
+# uma URL efêmera `https://<random>.trycloudflare.com` válida enquanto o processo
+# estiver de pé. Ideal p/ compartilhar o dev com stakeholders/webhooks externos.
+#
+# Uso: sh scripts/dev-tunnel [PORTA]
+#   PORTA  porta do dev-server (default 3000 — a que o compose publica)
+# Requer: cloudflared no PATH · dev-server respondendo na PORTA.
+#
+# Ctrl+C derruba o tunnel. A URL expira quando o processo termina.
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$SCRIPT_DIR/lib/shared.sh"
+cd "$(repo_root)"
+
+PORT="${1:-3000}"
+TARGET="http://localhost:${PORT}"
+
+# ---------- helpers de output (usa cores de scripts/lib/shared.sh) ----------
+# `color` (de shared.sh) retorna non-zero quando NÃO é TTY ([ -t ] false) — sob
+# `set -eu` isso mataria o script. `|| true` neutraliza sem afetar o stdout vazio.
+warn() { c=$(color 2 33 || true); r=$(color 2 0 || true); printf '%s⚠%s %s\n' "$c" "$r" "$1" >&2; }
+die()  { warn "$1"; exit 1; }
+ok()   { c=$(color 1 32 || true); r=$(color 1 0 || true); printf '%s✓%s %s\n' "$c" "$r" "$1"; }
+step() { c=$(color 1 1 || true); r=$(color 1 0 || true); printf '%s▶%s %s\n' "$c" "$r" "$1"; }
+hi()   { c=$(color 1 36 || true); b=$(color 1 1 || true); r=$(color 1 0 || true); }
+# NÃO nomear helper `head` — sombreia o binário `head` usado em `grep | head -1`.
+
+# ---------- pré-condições ----------
+command -v cloudflared >/dev/null 2>&1 || die "cloudflared não encontrado no PATH (instale: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)"
+
+if ! curl -sf -o /dev/null --max-time 3 "http://localhost:${PORT}/health" 2>/dev/null; then
+	die "dev-server não responde em ${TARGET}/health — suba o pod primeiro: bun dev"
+fi
+ok "dev-server vivo em ${TARGET}"
+
+# ---------- quick tunnel ----------
+# `cloudflared tunnel --url <TARGET>` sobe um quick tunnel e imprime a URL pública
+# no stderr (linha "Your quick Tunnel has been created ... https://<id>.trycloudflare.com").
+# Arquivo temporário captura o stderr p/ extrairmos a URL e mostrá-la em destaque.
+# POSIX: sem process substitution (dash não suporta) — stderr vai pro log, e um
+# `tail -f` espelha o log no terminal até o tunnel fechar.
+LOG=$(mktemp -t emissor-dev-tunnel.XXXXXX.log)
+TAIL_PID=""
+cleanup() {
+	[ -n "$TAIL_PID" ] && kill "$TAIL_PID" 2>/dev/null || true
+	[ -n "$TUNNEL_PID" ] && kill "$TUNNEL_PID" 2>/dev/null || true
+	rm -f "$LOG"
+	printf "\n"
+	warn "tunnel encerrado" >&2
+}
+trap cleanup INT TERM EXIT
+
+step "abrindo tunnel Cloudflare -> ${TARGET} (URL efêmera, sem login)"
+printf "  aguardando URL pública... (Ctrl+C encerra)\n\n"
+
+# cloudflared em background; stderr (onde a URL é impressa) vai pro log.
+cloudflared tunnel --url "$TARGET" 2>"$LOG" &
+TUNNEL_PID=$!
+# Espelha o log no terminal (conn logs do cloudflared) sem bloquear o script.
+tail -f "$LOG" 2>/dev/null &
+TAIL_PID=$!
+
+# Espera até extrair a URL (ou o processo morrer). Limite ~40s.
+# O cloudflared imprime a URL numa linha "|  https://<id>.trycloudflare.com  |"
+# DEPOIS de "Your quick Tunnel has been created" — pode levar alguns segundos.
+URL=""
+i=0
+while [ $i -lt 80 ] && kill -0 "$TUNNEL_PID" 2>/dev/null; do
+	URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG" 2>/dev/null | head -1 || true)
+	[ -n "$URL" ] && break
+	i=$((i + 1))
+	sleep 0.5
+done
+
+if [ -z "$URL" ]; then
+	die "não foi possível obter a URL do tunnel em 40s — veja $LOG"
+fi
+
+# URL em destaque — formato simples e robusto (sem aritmética de padding, que é
+# frágil quando ${#URL} varia por conta de bytes multibyte/terminal width).
+printf '\n'
+hi  # popula c (ciano p/ a URL), b (azul p/ a moldura), r (reset)
+printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$b" "$r"
+printf '%s  PREVIEW/DEV URL — compartilhe enquanto o tunnel durar%s\n' "$b" "$r"
+printf '%s  %s%s%s\n' "$b" "$c" "$URL" "$r"
+printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$b" "$r"
+printf '\n  health: %s/health\n' "$URL"
+printf '  auth:   header X-API-Key (ver .env)\n\n'
+
+# Mantém o script vivo até Ctrl+C — o tunnel cai quando o cloudflared morre.
+wait "$TUNNEL_PID"
