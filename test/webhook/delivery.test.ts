@@ -5,12 +5,12 @@
  * TDD: vermelho (módulo ausente) → verde.
  */
 import { describe, expect, mock, test } from "bun:test";
+import type { EventoWebhook } from "#/domain/types";
 import {
 	assinarWebhook,
 	calcularEventoId,
 	enviarWebhook,
 } from "#/workers/webhook.worker";
-import type { EventoWebhook } from "#/domain/types";
 
 const eventoBase: EventoWebhook = {
 	eventoId: "",
@@ -36,8 +36,14 @@ describe("calcularEventoId (SPEC-0001 caso 13 — determinístico)", () => {
 	});
 
 	test("timestamp diferente → eventoId diferente", () => {
-		const a = calcularEventoId({ ...eventoBase, timestamp: "2026-08-17T12:00:00Z" });
-		const b = calcularEventoId({ ...eventoBase, timestamp: "2026-08-17T12:00:01Z" });
+		const a = calcularEventoId({
+			...eventoBase,
+			timestamp: "2026-08-17T12:00:00Z",
+		});
+		const b = calcularEventoId({
+			...eventoBase,
+			timestamp: "2026-08-17T12:00:01Z",
+		});
 		expect(a).not.toBe(b);
 	});
 
@@ -65,7 +71,9 @@ describe("assinarWebhook (HMAC X-Webhook-Signature)", () => {
 		expect(sig).toMatch(/^[0-9a-f]{64}$/);
 		// verifica manualmente com node:crypto
 		const { createHmac } = await import("node:crypto");
-		const esperado = createHmac("sha256", "segredo").update(corpo).digest("hex");
+		const esperado = createHmac("sha256", "segredo")
+			.update(corpo)
+			.digest("hex");
 		expect(sig).toBe(esperado);
 	});
 
@@ -78,7 +86,11 @@ describe("assinarWebhook (HMAC X-Webhook-Signature)", () => {
 describe("enviarWebhook (SPEC-0001 caso 12 — não-2xx → throw/retry)", () => {
 	test("2xx → resolve e envia body JSON + header X-Webhook-Signature", async () => {
 		const fetchImpl = mock((_url: unknown, _init?: unknown) =>
-			Promise.resolve({ ok: true, status: 200 } as Response),
+			Promise.resolve({
+				ok: true,
+				status: 200,
+				text: () => Promise.resolve(""),
+			} as unknown as Response),
 		);
 		const evento = { ...eventoBase, eventoId: "id-1" };
 		await enviarWebhook(evento, {
@@ -99,7 +111,11 @@ describe("enviarWebhook (SPEC-0001 caso 12 — não-2xx → throw/retry)", () =>
 
 	test("500 → throw (BullMQ retenta; caso 12)", async () => {
 		const fetchImpl = mock(() =>
-			Promise.resolve({ ok: false, status: 500 } as Response),
+			Promise.resolve({
+				ok: false,
+				status: 500,
+				text: () => Promise.resolve("boom"),
+			} as unknown as Response),
 		);
 		await expect(
 			enviarWebhook(eventoBase, {

@@ -3,8 +3,8 @@
  * TDD: vermelho (módulo ausente) → verde.
  */
 import { describe, expect, mock, test } from "bun:test";
-import { assinarWebhook, enviarWebhook } from "#/workers/webhook.worker";
 import type { EventoWebhook } from "#/domain/types";
+import { assinarWebhook, enviarWebhook } from "#/workers/webhook.worker";
 
 const evento: EventoWebhook = {
 	eventoId: "id-1",

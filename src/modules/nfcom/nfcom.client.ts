@@ -10,6 +10,8 @@
  * `env` (NFCOM_API_URL/LOGIN/SENHA). Lança `NfcomApiError` em non-2xx,
  * expondo `status` p/ o repository decidir reauth (401).
  */
+
+import { httpFetch } from "#/lib/http";
 import type { ApiNFComEmitir, NFComResposta } from "./translators/emitir";
 
 /** Cache do env lido de forma preguiçosa — só dispara validação quando o caller
@@ -27,10 +29,23 @@ export interface NfcomApiError extends Error {
 	status: number;
 }
 
+/**
+ * Item de uma NFCom no `/api/lista` (swagger: array de `ApiNFCom` dentro de
+ * `ApiLista.dados`). Campos usados p/ inspeção manual (SPEC-0001 caso 15).
+ */
 export interface NFComListaItemResposta {
 	chave: string;
 	situacao: string;
 	protocolo: string;
+}
+
+/**
+ * Resposta de `GET /api/lista` — o swagger define `ApiLista { dados: ApiNFCom[] }`
+ * (não um array nu). `dados` é `nullable`. Os demais campos
+ * (`registros_total`/`paginas_total`/`pagina`) não são usados pela heurística.
+ */
+interface ApiListaResposta {
+	dados: NFComListaItemResposta[] | null;
 }
 
 export interface NfcomClient {
@@ -39,8 +54,8 @@ export interface NfcomClient {
 	consultaLista(
 		token: string,
 		cpfcnpj: string,
-		dataInicio: string,
-		dataFim: string,
+		inicio: string,
+		fim: string,
 	): Promise<NFComListaItemResposta[]>;
 }
 
@@ -73,12 +88,14 @@ export function criarNfcomClient(opts: CriarNfcomClientOpts = {}): NfcomClient {
 			"Content-Type": "application/json",
 		};
 		if (options.token) headers.Authorization = `Bearer ${options.token}`;
-		const res = await fetchImpl(`${baseUrl}${path}`, {
+		// httpFetch aplica timeout de 30s (AbortController) — ADR-0005.
+		const { res, text } = await httpFetch({
+			url: `${baseUrl}${path}`,
 			method: options.method,
 			headers,
 			body: options.body ? JSON.stringify(options.body) : undefined,
+			fetchImpl,
 		});
-		const text = await res.text();
 		if (!res.ok) throw makeError(res.status, text);
 		return (text ? JSON.parse(text) : undefined) as T;
 	}
@@ -97,16 +114,20 @@ export function criarNfcomClient(opts: CriarNfcomClientOpts = {}): NfcomClient {
 				body: payload,
 			});
 		},
-		async consultaLista(token, cpfcnpj, dataInicio, dataFim) {
+		async consultaLista(token, cpfcnpj, inicio, fim) {
 			const qs = new URLSearchParams({
 				cpfcnpj,
-				dataInicio,
-				dataFim,
+				// Swagger verificado: o endpoint usa `inicio`/`fim` (não `dataInicio`/`dataFim`).
+				// Sem eles o gateway filtra por default e a inspeção (SPEC-0001 caso 15) falha.
+				inicio,
+				fim,
 			});
-			return request<NFComListaItemResposta[]>(
+			const { dados } = await request<ApiListaResposta>(
 				`/api/lista?${qs.toString()}`,
 				{ method: "GET", token },
 			);
+			// `dados` é nullable no swagger — normaliza p/ [] (nenhum resultado).
+			return dados ?? [];
 		},
 	};
 }

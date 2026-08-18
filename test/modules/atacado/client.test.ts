@@ -1,14 +1,26 @@
 import { describe, expect, it, mock } from "bun:test";
-import { AtacadoError, createAtacadoClient } from "#/modules/atacado/atacado.client";
+import {
+	AtacadoError,
+	createAtacadoClient,
+} from "#/modules/atacado/atacado.client";
 
-/** fetch fake — retorna Response-like com status + json/text. */
-function fakeFetch(response: { status: number; body?: unknown; text?: string }) {
+/** fetch fake — retorna Response-like com status + json/text (o cliente lê
+ * `text` via httpFetch, ADR-0005). Sem `text` explícito, serializa o `body`. */
+function fakeFetch(response: {
+	status: number;
+	body?: unknown;
+	text?: string;
+}) {
 	return mock((_url: string, _init?: RequestInit) =>
 		Promise.resolve({
 			ok: response.status >= 200 && response.status < 300,
 			status: response.status,
 			json: () => Promise.resolve(response.body ?? {}),
-			text: () => Promise.resolve(response.text ?? ""),
+			text: () =>
+				Promise.resolve(
+					response.text ??
+						(response.body !== undefined ? JSON.stringify(response.body) : ""),
+				),
 		}),
 	) as unknown as typeof fetch;
 }
@@ -26,7 +38,8 @@ describe("atacado.client · lazy env / injetável", () => {
 		const f = fakeFetch({ status: 200, body: { id: 1 } });
 		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
 		await client.get("parceiros", { filterByTk: 1 });
-		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		const url = (f as unknown as ReturnType<typeof mock>).mock
+			.calls[0][0] as string;
 		expect(url).toContain("https://atacado.test/testapp/api/parceiros:get");
 	});
 
@@ -34,7 +47,8 @@ describe("atacado.client · lazy env / injetável", () => {
 		const f = fakeFetch({ status: 200, body: { id: 1 } });
 		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
 		await client.get("parceiros", { filterByTk: 1 });
-		const init = (f as unknown as ReturnType<typeof mock>).mock.calls[0][1] as RequestInit;
+		const init = (f as unknown as ReturnType<typeof mock>).mock
+			.calls[0][1] as RequestInit;
 		const headers = init.headers as Record<string, string>;
 		expect(headers.Authorization).toBe("Bearer test-key");
 	});
@@ -44,8 +58,12 @@ describe("atacado.client · AtacadoError", () => {
 	it("carrega statusCode", async () => {
 		const f = fakeFetch({ status: 500, text: "boom" });
 		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
-		await expect(client.get("parceiros", { filterByTk: 1 })).rejects.toBeInstanceOf(AtacadoError);
-		await expect(client.get("parceiros", { filterByTk: 1 })).rejects.toMatchObject({
+		await expect(
+			client.get("parceiros", { filterByTk: 1 }),
+		).rejects.toBeInstanceOf(AtacadoError);
+		await expect(
+			client.get("parceiros", { filterByTk: 1 }),
+		).rejects.toMatchObject({
 			statusCode: 500,
 		});
 	});

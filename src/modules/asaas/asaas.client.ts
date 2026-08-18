@@ -6,6 +6,8 @@
  * rede. Tipos externos do Asaas vivem só aqui e no translator — não cruzam
  * a fronteira do módulo (ADR-0004).
  */
+
+import { httpFetch } from "#/lib/http";
 import { log } from "#/lib/logger";
 
 /** Cache do env lido de forma preguiçosa — só dispara validação quando o caller
@@ -58,13 +60,18 @@ export interface CriarPaymentBody {
 }
 
 export interface AsaasClient {
-	buscarCustomerPorDocumento(cpfcnpj: string): Promise<AsaasListDTO<AsaasCustomerDTO>>;
+	buscarCustomerPorDocumento(
+		cpfcnpj: string,
+	): Promise<AsaasListDTO<AsaasCustomerDTO>>;
 	criarCustomer(body: {
 		name: string;
 		email: string;
 		cpfCnpj: string;
 	}): Promise<AsaasCustomerDTO>;
-	atualizarCustomer(id: string, body: { name?: string; email?: string }): Promise<AsaasCustomerDTO>;
+	atualizarCustomer(
+		id: string,
+		body: { name?: string; email?: string },
+	): Promise<AsaasCustomerDTO>;
 	criarPayment(body: CriarPaymentBody): Promise<AsaasPaymentDTO>;
 	consultarPaymentPorExternalReference(
 		externalReference: string,
@@ -81,34 +88,73 @@ export interface CreateAsaasClientOpts {
  * Factory do cliente Asaas. Em produção lê `env.ASAAS_API_URL` /
  * `env.ASAAS_API_KEY`; em teste, injeta via `opts`.
  */
-export function createAsaasClient(opts: CreateAsaasClientOpts = {}): AsaasClient {
+export function createAsaasClient(
+	opts: CreateAsaasClientOpts = {},
+): AsaasClient {
 	const fetchImpl = opts.fetchImpl ?? fetch;
 	// Resolve baseUrl/apiKey: opts injetados (testes) prevalecem; senão lê env lazy.
 	const resolveCreds = async () => {
-		if (opts.baseUrl && opts.apiKey) return { baseUrl: opts.baseUrl, apiKey: opts.apiKey };
+		if (opts.baseUrl && opts.apiKey)
+			return { baseUrl: opts.baseUrl, apiKey: opts.apiKey };
 		const e = await envOrThrow();
-		return { baseUrl: opts.baseUrl ?? e.baseUrl, apiKey: opts.apiKey ?? e.apiKey };
+		return {
+			baseUrl: opts.baseUrl ?? e.baseUrl,
+			apiKey: opts.apiKey ?? e.apiKey,
+		};
 	};
+
+	/** Tenta `JSON.parse(text)`; texto vazio/não-JSON → `undefined` (não lança
+	 * `SyntaxError` — m2: resposta não-JSON, ex. HTML de WAF/503, vira
+	 * `AsaasApiError` no caminho de erro, preservando o status p/ retry). */
+	function parseBody(text: string): unknown {
+		if (!text) return undefined;
+		try {
+			return JSON.parse(text);
+		} catch {
+			return undefined;
+		}
+	}
 
 	async function request<T>(path: string, init: RequestInit): Promise<T> {
 		const { baseUrl, apiKey } = await resolveCreds();
 		const url = `${baseUrl}${path}`;
-		const res = await fetchImpl(url, {
-			...init,
+		// httpFetch aplica timeout de 30s (AbortController) — ADR-0005.
+		const { res, text } = await httpFetch({
+			url,
+			method: init.method ?? "GET",
 			headers: {
 				"Content-Type": "application/json",
 				access_token: apiKey,
-				...(init.headers ?? {}),
+				...(init.headers as Record<string, string> | undefined),
 			},
+			body: typeof init.body === "string" ? init.body : undefined,
+			fetchImpl,
 		});
-		const body = (await res.json()) as unknown;
+		const body = parseBody(text);
 		if (!res.ok) {
-			const errors = (body as { errors?: { code: string; description: string }[] }).errors ?? [];
+			// Resposta não-JSON (HTML 503/WAF) → body = undefined → errors = [] e o
+			// status é preservado; o worker classifica retryable (5xx) — m2.
+			const errors =
+				(
+					body as
+						| { errors?: { code: string; description: string }[] }
+						| null
+						| undefined
+				)?.errors ?? [];
 			log.warn({ status: res.status, path }, "asaas: resposta não-2xx");
 			throw new AsaasApiError(
 				`Asaas ${res.status} em ${path}`,
 				res.status,
 				errors,
+			);
+		}
+		if (body === undefined && text.trim() !== "") {
+			// 2xx com body não-JSON (proxy/WAF) — resposta inesperada: erro tipado em
+			// vez de `SyntaxError`/undefined silencioso que quebraria o caller.
+			throw new AsaasApiError(
+				`Asaas ${res.status} em ${path} (resposta não-JSON)`,
+				res.status,
+				[],
 			);
 		}
 		return body as T;
@@ -128,10 +174,13 @@ export function createAsaasClient(opts: CreateAsaasClientOpts = {}): AsaasClient
 			});
 		},
 		atualizarCustomer(id, body) {
-			return request<AsaasCustomerDTO>(`/v3/customers/${encodeURIComponent(id)}`, {
-				method: "PUT",
-				body: JSON.stringify(body),
-			});
+			return request<AsaasCustomerDTO>(
+				`/v3/customers/${encodeURIComponent(id)}`,
+				{
+					method: "PUT",
+					body: JSON.stringify(body),
+				},
+			);
 		},
 		criarPayment(body) {
 			return request<AsaasPaymentDTO>(`/v3/payments`, {

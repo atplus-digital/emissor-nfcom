@@ -17,16 +17,15 @@
  * Config injetável (url/secret/fetch) para não disparar validação de env em
  * testes; o composition root (Fase 6) liga `env.WEBHOOK_*`.
  */
-import { createHmac } from "node:crypto";
-import { createHash } from "node:crypto";
-import { log, runWithLogContext } from "#/lib/logger";
-import type { EventoWebhook } from "#/domain/types";
-
+import { createHash, createHmac } from "node:crypto";
 // BullMQ/queues/env carregados LENTAMENTE (dynamic import) só nas funções que
 // tocam Redis — manter as funções puras (calcularEventoId/assinarWebhook/
 // enviarWebhook/handleWebhookSend) livres de `env` p/ não disparar validação
 // de env em testes unitários.
 import type { Job } from "bullmq";
+import type { EventoWebhook } from "#/domain/types";
+import { httpFetch } from "#/lib/http";
+import { log, runWithLogContext } from "#/lib/logger";
 
 /** Tipo mínimo de Job p/ handleWebhookSend (desacoplado de bullmq runtime). */
 interface JobLike {
@@ -94,24 +93,34 @@ export async function enviarWebhook(
 	config: WebhookConfig,
 ): Promise<void> {
 	const { url, secret } = config;
-	if (!url) return; // caso 14 — sem URL configurada, não empurra
+	if (!url) {
+		// caso 14 — sem URL configurada, não empurra, mas registra (SPEC-0001 caso 14).
+		log.info(
+			{ faturaId: evento.faturaId },
+			"webhook desativado (WEBHOOK_URL vazia) — evento não empurrado",
+		);
+		return;
+	}
 
 	const fetchImpl = config.fetchImpl ?? fetch;
 	const corpo = JSON.stringify(evento);
 	const assinatura = assinarWebhook(corpo, secret);
 
-	const resp = await fetchImpl(url, {
+	// httpFetch aplica timeout de 30s (AbortController) — ADR-0005.
+	const { res } = await httpFetch({
+		url,
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
 			"X-Webhook-Signature": assinatura,
 		},
 		body: corpo,
+		fetchImpl,
 	});
 
-	if (!resp.ok) {
+	if (!res.ok) {
 		throw new Error(
-			`webhook não-2xx: status=${resp.status} faturaId=${evento.faturaId} estado=${evento.estado}`,
+			`webhook não-2xx: status=${res.status} faturaId=${evento.faturaId} estado=${evento.estado}`,
 		);
 	}
 }
@@ -127,11 +136,20 @@ export async function handleWebhookSend(
 	deps: WebhookWorkerDeps,
 ): Promise<void> {
 	const evento = job.data;
-	await runWithLogContext({ fila: "webhook", jobId: job.id ?? "" }, async () => {
-		log.info({ faturaId: evento.faturaId, estado: evento.estado }, "webhook: enviando");
-		await enviarWebhook(evento, deps.config);
-		log.info({ faturaId: evento.faturaId, estado: evento.estado }, "webhook: entregue");
-	});
+	await runWithLogContext(
+		{ fila: "webhook", jobId: job.id ?? "" },
+		async () => {
+			log.info(
+				{ faturaId: evento.faturaId, estado: evento.estado },
+				"webhook: enviando",
+			);
+			await enviarWebhook(evento, deps.config);
+			log.info(
+				{ faturaId: evento.faturaId, estado: evento.estado },
+				"webhook: entregue",
+			);
+		},
+	);
 }
 
 /** Cria o Worker BullMQ na fila `webhook` (composition root — Fase 6). */
@@ -143,7 +161,9 @@ export async function criarWebhookWorker(
 		import("#/lib/queues"),
 		import("#/lib/queue-names"),
 	]);
-	return new Worker(QUEUE_NAMES.WEBHOOK, async (job: Job) => handleWebhookSend(job, deps));
+	return new Worker(QUEUE_NAMES.WEBHOOK, async (job: Job) =>
+		handleWebhookSend(job, deps),
+	);
 }
 
 /** Enfileira um evento de webhook na fila `webhook`. */
@@ -156,13 +176,19 @@ export async function enfileirarWebhook(
 		...evento,
 		eventoId: evento.eventoId || calcularEventoId(evento),
 	};
-	const [{ getQueue }, { QUEUE_NAMES, JOB_NAMES }, { WORKER_DEFAULTS }] = await Promise.all([
-		import("#/lib/queues"),
-		import("#/lib/queue-names"),
-		import("#/lib/queues"),
-	]);
+	const [{ getQueue }, { QUEUE_NAMES, JOB_NAMES }, { WORKER_DEFAULTS }] =
+		await Promise.all([
+			import("#/lib/queues"),
+			import("#/lib/queue-names"),
+			import("#/lib/queues"),
+		]);
 	await getQueue(QUEUE_NAMES.WEBHOOK).add(JOB_NAMES.WEBHOOK_SEND, eventoComId, {
-		jobId: eventoComId.eventoId, // dedup no BullMQ por eventoId (idempotência de entrega)
+		// dedup BullMQ: `jobId = eventoId` cumpre o papel da idempotency key
+		// `webhook:{faturaId}:{eventoId}` citada na SPEC-0001 — um evento duplicado
+		// na fila (mesmo eventoId) é ignorado pelo BullMQ (job já existe), sem
+		// re-entrega ao receptor. Não é preciso uma key no SQLite: o dedup por jobId
+		// já garante a entrega ao-menos-uma-vez (ADR-0002). (m11 — documentação)
+		jobId: eventoComId.eventoId,
 		attempts: WORKER_DEFAULTS.attempts,
 		backoff: WORKER_DEFAULTS.backoff,
 	});
