@@ -28,10 +28,6 @@ export interface DestinatarioNFCom {
 export interface EmitirNFComInput {
 	destinatario: DestinatarioNFCom;
 	itens: Item[];
-	/** CFOP default via env (SPEC-0002). */
-	cfop: string;
-	/** CCLASS default via env (SPEC-0002). */
-	cclass: string;
 	/**
 	 * Deliberadamente SEM `externalReference` — o schema `ApiNFComEmitir` é
 	 * `additionalProperties: false` (não aceita referência própria).

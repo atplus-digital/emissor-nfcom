@@ -60,8 +60,6 @@ describe("montarPayloadEmitir", () => {
 			email: "cliente@ex.com",
 		},
 		itens,
-		cfop: "6102",
-		cclass: "123",
 	};
 
 	it("NÃO inclui externalReference no payload (additionalProperties: false)", () => {
@@ -70,18 +68,67 @@ describe("montarPayloadEmitir", () => {
 		expect(JSON.stringify(payload)).not.toContain("externalReference");
 	});
 
-	it("inclui destinatário, itens, cfop e cclass", () => {
+	it("é achatado no topo — sem destinatario aninhado nem cfop/cclass no topo", () => {
 		const payload = montarPayloadEmitir(input);
-		expect(payload).toHaveProperty("destinatario");
-		expect(payload).toHaveProperty("itens");
-		expect(payload.cfop).toBe("6102");
-		expect(payload.cclass).toBe("123");
+		// swagger `ApiNFComEmitir` é flat (additionalProperties:false):
+		expect(payload).not.toHaveProperty("destinatario");
+		expect(payload).not.toHaveProperty("cfop");
+		expect(payload).not.toHaveProperty("cclass");
+		// endereço e dados do destinatário sobem ao topo (flat):
+		expect(payload.nome).toBe(input.destinatario.nome);
+		expect(payload.cpfcnpj).toBe(input.destinatario.cpfcnpj);
+		expect(payload.endereco).toBe(input.destinatario.endereco.logradouro);
+		expect(payload.endereco_numero).toBe(input.destinatario.endereco.numero);
+		expect(payload.bairro).toBe(input.destinatario.endereco.bairro);
+		expect(payload.cidade).toBe(input.destinatario.endereco.cidade);
+		expect(payload.uf).toBe(input.destinatario.endereco.uf);
+		expect(payload.cep).toBe(input.destinatario.endereco.cep);
+		expect(payload.email).toBe(input.destinatario.email);
 	});
 
-	it("serializa itens sem externalReference e sem campos extras", () => {
+	it("move cfop/cclass para DENTRO de cada item", () => {
 		const payload = montarPayloadEmitir(input);
-		const primeiroItem = (payload.itens as unknown[])[0];
+		expect(payload.itens).toHaveLength(1);
+		const primeiroItem = payload.itens[0];
+		expect(primeiroItem.cfop).toBe("6102");
+		expect(primeiroItem.cclass).toBe("123");
+	});
+
+	it("serializa itens com os campos exatos do swagger (sem aliq_icms/icms/incide_aliquota/codigo)", () => {
+		const payload = montarPayloadEmitir(input);
+		const primeiroItem = payload.itens[0];
 		expect(primeiroItem).not.toHaveProperty("externalReference");
+		expect(primeiroItem).not.toHaveProperty("codigo");
+		expect(primeiroItem).not.toHaveProperty("aliq_icms");
+		expect(primeiroItem).not.toHaveProperty("icms");
+		expect(primeiroItem).not.toHaveProperty("incide_aliquota");
+		expect(primeiroItem).toHaveProperty("descricao", "Serviço de telecom");
+		expect(primeiroItem).toHaveProperty("quantidade", 1);
+		expect(primeiroItem).toHaveProperty("bc_icms", 0);
+	});
+
+	it("converte centavos (domínio) para reais (gateway) em unitario/total/bc_icms", () => {
+		const payload = montarPayloadEmitir({
+			...input,
+			itens: [
+				{
+					descricao: "Serviço de telecom",
+					cfop: "6102",
+					cclass: "123",
+					quantidade: 2,
+					unitario: 15000,
+					total: 30000,
+					aliqIcms: 18,
+					bcIcms: 30000,
+					icms: 5400,
+					incideAliquota: true,
+				},
+			],
+		});
+		const primeiroItem = payload.itens[0];
+		expect(primeiroItem.unitario).toBe(150.0);
+		expect(primeiroItem.total).toBe(300.0);
+		expect(primeiroItem.bc_icms).toBe(300.0);
 	});
 });
 

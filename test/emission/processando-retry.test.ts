@@ -24,7 +24,7 @@ describe("SPEC-0001 caso 6 — processando → retry", () => {
 		await expect(
 			handleEmitNfcom(
 				{ data: baseData, attemptsMade: 0, opts: {} } as any,
-				{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+				{ db, nfcom, asaas: {} as any, atacado: {} as any },
 			),
 		).rejects.toThrow(/processando/);
 		// não marcou a nota como erro — permanece a-emitir (retry)
@@ -55,7 +55,7 @@ describe("SPEC-0001 caso 6 — processando → retry", () => {
 		await expect(
 			handleEmitNfcom(
 				{ data: baseData, attemptsMade: 1, opts: {} } as any,
-				{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+				{ db, nfcom, asaas: {} as any, atacado: {} as any },
 			),
 		).rejects.toThrow(/processando/);
 		// não re-emite, não marca erro, não registra erro

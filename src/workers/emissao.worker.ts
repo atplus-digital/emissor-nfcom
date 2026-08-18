@@ -135,8 +135,6 @@ export interface EmissaoDeps {
 	asaas: AsaasPort;
 	nfcom: NfcomPort;
 	db: import("#/lib/db/client").CoordDB;
-	cfop: string;
-	cclass: string;
 	/** Enfileira um job filho (fan-out). Testes stubbam; o wiring BullMQ implementa. */
 	enqueueFilho?: (name: string, data: unknown) => Promise<void>;
 	/** Carrega a fatura com árvore (cobranças + notas). Default via atacado.buscarFaturaPorChave. */
@@ -453,8 +451,6 @@ export async function handleEmitNfcom(
 					},
 				},
 				itens: d.itens,
-				cfop: deps.cfop,
-				cclass: deps.cclass,
 			});
 			const map = mapearSituacaoNota(res.situacao);
 			if (map.statusInterno === "a-emitir") {

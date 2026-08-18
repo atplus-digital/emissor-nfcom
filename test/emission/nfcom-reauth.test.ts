@@ -31,7 +31,7 @@ describe("SPEC-0001 caso 9 — reauth 401 transparente (no módulo NFCom)", () =
 		} as unknown as NfcomPort;
 		const res = await handleEmitNfcom(
 			{ data: baseData, attemptsMade: 0, opts: {} } as any,
-			{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+			{ db, nfcom, asaas: {} as any, atacado: {} as any },
 		);
 		// o worker chama o port uma vez; o reauth é invisível a ele
 		expect(nfcom.emitirNFCom).toHaveBeenCalledTimes(1);

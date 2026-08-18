@@ -25,7 +25,7 @@ describe("SPEC-0001 caso 2 — orphan lease reassume", () => {
 		const enqueued: string[] = [];
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 500, parceiroId: 1, dataReferencia: "2026-08-01" }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado, asaas: {} as any, nfcom: {} as any, cfop: "6102", cclass: "X", enqueueFilho: async (name) => { enqueued.push(name); } },
+			{ db, atacado, asaas: {} as any, nfcom: {} as any, enqueueFilho: async (name) => { enqueued.push(name); } },
 		);
 		// só a cobrança a-emitir (501) é enfileirada; a 502 (emitida) é pulada
 		expect(enqueued.filter((n) => n === "emit-cobranca").length).toBe(1);
@@ -43,7 +43,7 @@ describe("SPEC-0001 caso 2 — orphan lease reassume", () => {
 		const enqueued: string[] = [];
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 501, parceiroId: 1, dataReferencia: "2026-08-01" }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado, asaas: {} as any, nfcom: {} as any, cfop: "6102", cclass: "X", enqueueFilho: async (name) => { enqueued.push(name); } },
+			{ db, atacado, asaas: {} as any, nfcom: {} as any, enqueueFilho: async (name) => { enqueued.push(name); } },
 		);
 		expect(res.enfileiradas).toBe(0);
 		expect(enqueued.length).toBe(0);
@@ -66,7 +66,7 @@ describe("SPEC-0001 caso 2 — orphan lease reassume", () => {
 		const enqueued: string[] = [];
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 510, parceiroId: 1, dataReferencia: "2026-08-01" }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado, asaas: {} as any, nfcom: {} as any, cfop: "6102", cclass: "X", limiteLeaseStaleMs: 3 * 60 * 1000, enqueueFilho: async (name) => { enqueued.push(name); } },
+			{ db, atacado, asaas: {} as any, nfcom: {} as any, limiteLeaseStaleMs: 3 * 60 * 1000, enqueueFilho: async (name) => { enqueued.push(name); } },
 		);
 		// reassumiu: enfileirou a cobrança a-emitir (não pulou)
 		expect(res.enfileiradas).toBe(1);

@@ -43,7 +43,7 @@ describe("SPEC-0001 caso 15 — dedup de nota (não re-emite → inspeção)", (
 
 		const res = await handleEmitNfcom(
 			{ data: baseData, attemptsMade: 1, opts: {} } as any,
-			{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+			{ db, nfcom, asaas: {} as any, atacado: {} as any },
 		);
 
 		expect(nfcom.emitirNFCom).toHaveBeenCalledTimes(0);
@@ -68,7 +68,7 @@ describe("SPEC-0001 caso 15 — dedup de nota (não re-emite → inspeção)", (
 
 		const res = await handleEmitNfcom(
 			{ data: baseData, attemptsMade: 0, opts: {} } as any,
-			{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+			{ db, nfcom, asaas: {} as any, atacado: {} as any },
 		);
 		expect(nfcom.emitirNFCom).toHaveBeenCalledTimes(1);
 		expect(res.notaOk).toBe(true);
@@ -92,7 +92,7 @@ describe("SPEC-0001 caso 15 — dedup de nota (não re-emite → inspeção)", (
 		} as unknown as NfcomPort;
 		const res = await handleEmitNfcom(
 			{ data: baseData, attemptsMade: 0, opts: {} } as any,
-			{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+			{ db, nfcom, asaas: {} as any, atacado: {} as any },
 		);
 		expect(nfcom.emitirNFCom).toHaveBeenCalledTimes(0);
 		expect(res.notaOk).toBe(true);

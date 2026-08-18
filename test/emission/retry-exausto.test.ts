@@ -22,7 +22,7 @@ describe("SPEC-0001 caso 17 — retry exausto → erro via outbox", () => {
 		} as unknown as NfcomPort;
 		const res = await handleEmitNfcom(
 			{ data: baseData, attemptsMade: 4, opts: { attempts: 5 } } as any,
-			{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+			{ db, nfcom, asaas: {} as any, atacado: {} as any },
 		);
 		expect(res.statusInterno).toBe("erro");
 		expect(res.notaOk).toBe(false);

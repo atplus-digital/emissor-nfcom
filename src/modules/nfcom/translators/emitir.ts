@@ -14,43 +14,42 @@ import type {
 } from "#/domain/ports/nfcom.port";
 import { normalizarSituacao } from "./situacao";
 
-/** Item do gateway (snake/camel mistos conforme swagger). */
-interface ItemGateway {
-	codigo?: string;
+/**
+ * Item do gateway (`ApiNFComItemEmitir`) — campos exatos do swagger verificado
+ * (ADR-0001): SEM `codigo`/`aliq_icms`/`icms`/`incide_aliquota` (additionalProperties:false).
+ * Monetário em reais (o domínio carrega centavos — ADR-0004; conversão aqui).
+ */
+export interface ItemGateway {
+	item: number;
 	descricao: string;
-	cfop: string;
 	cclass: string;
+	cfop: string;
 	quantidade: number;
 	unitario: number;
 	total: number;
-	aliq_icms: number;
 	bc_icms: number;
-	icms: number;
-	incide_aliquota: boolean;
 }
 
-/** Payload `ApiNFComEmitir` — additionalProperties: false (sem externalReference). */
+/**
+ * Payload `ApiNFComEmitir` — TOP-LEVEL FLAT (swagger verificado, ADR-0001):
+ * destinatário e endereço sobem ao topo (`nome`, `cpfcnpj`, `endereco`,
+ * `endereco_numero`, `bairro`, `cidade`, `uf`, `cep`); `cfop`/`cclass` moram em
+ * CADA item — não há `cfop`/`cclass` nem `destinatario` aninhado no topo.
+ * `additionalProperties: false` — sem `externalReference` nem campos extras.
+ */
 export interface ApiNFComEmitir {
-	destinatario: {
-		nome: string;
-		cpfcnpj: string;
-		endereco: {
-			logradouro: string;
-			numero: string;
-			bairro: string;
-			cep: string;
-			cidade: string;
-			uf: string;
-		};
-		email?: string;
-		rgie?: string;
-		telefone?: string;
-		uf: string;
-		cidade: string;
-	};
+	nome: string;
+	cpfcnpj: string;
+	rgie?: string;
+	endereco: string;
+	endereco_numero: string;
+	bairro: string;
+	cidade: string;
+	uf: string;
+	cep: string;
+	telefone?: string;
+	email?: string;
 	itens: ItemGateway[];
-	cfop: string;
-	cclass: string;
 }
 
 /** Resposta `NFCom` do gateway (campos relevantes). */
@@ -64,42 +63,37 @@ export interface NFComResposta {
 	xml: string;
 }
 
-/** Monta o payload `ApiNFComEmitir` a partir do input de domínio. */
+/** Converte centavos (domínio, inteiro) para reais (gateway, decimal) — ADR-0004. */
+function centavosParaReais(centavos: number): number {
+	return centavos / 100;
+}
+
+/** Monta o payload `ApiNFComEmitir` (flat) a partir do input de domínio. */
 export function montarPayloadEmitir(input: EmitirNFComInput): ApiNFComEmitir {
-	const { destinatario, itens, cfop, cclass } = input;
+	const { destinatario, itens } = input;
+	const end = destinatario.endereco;
 	return {
-		destinatario: {
-			nome: destinatario.nome,
-			cpfcnpj: destinatario.cpfcnpj,
-			endereco: {
-				logradouro: destinatario.endereco.logradouro,
-				numero: destinatario.endereco.numero,
-				bairro: destinatario.endereco.bairro,
-				cep: destinatario.endereco.cep,
-				cidade: destinatario.endereco.cidade,
-				uf: destinatario.endereco.uf,
-			},
-			email: destinatario.email,
-			rgie: destinatario.rgie,
-			telefone: destinatario.telefone,
-			uf: destinatario.uf,
-			cidade: destinatario.cidade,
-		},
-		itens: itens.map((item: Item): ItemGateway => ({
-			codigo: item.codigo,
+		nome: destinatario.nome,
+		cpfcnpj: destinatario.cpfcnpj,
+		rgie: destinatario.rgie,
+		endereco: end.logradouro,
+		endereco_numero: end.numero,
+		bairro: end.bairro,
+		cidade: end.cidade,
+		uf: end.uf,
+		cep: end.cep,
+		telefone: destinatario.telefone,
+		email: destinatario.email,
+		itens: itens.map((item: Item, idx: number): ItemGateway => ({
+			item: item.item ?? idx + 1,
 			descricao: item.descricao,
-			cfop: item.cfop,
 			cclass: item.cclass,
+			cfop: item.cfop,
 			quantidade: item.quantidade,
-			unitario: item.unitario,
-			total: item.total,
-			aliq_icms: item.aliqIcms,
-			bc_icms: item.bcIcms,
-			icms: item.icms,
-			incide_aliquota: item.incideAliquota,
+			unitario: centavosParaReais(item.unitario),
+			total: centavosParaReais(item.total),
+			bc_icms: centavosParaReais(item.bcIcms),
 		})),
-		cfop,
-		cclass,
 	};
 }
 

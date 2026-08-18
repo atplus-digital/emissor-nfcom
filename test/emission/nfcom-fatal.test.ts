@@ -21,7 +21,7 @@ describe("SPEC-0001 caso 7 — rejeitada/cancelada → fatal (sem retry)", () =>
 		} as unknown as NfcomPort;
 		const res = await handleEmitNfcom(
 			{ data: baseData, attemptsMade: 0, opts: {} } as any,
-			{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+			{ db, nfcom, asaas: {} as any, atacado: {} as any },
 		);
 		expect(res.notaOk).toBe(false);
 		expect(res.statusInterno).toBe("erro");
@@ -36,7 +36,7 @@ describe("SPEC-0001 caso 7 — rejeitada/cancelada → fatal (sem retry)", () =>
 		} as unknown as NfcomPort;
 		const res = await handleEmitNfcom(
 			{ data: baseData, attemptsMade: 0, opts: {} } as any,
-			{ db, nfcom, asaas: {} as any, atacado: {} as any, cfop: "6102", cclass: "X" },
+			{ db, nfcom, asaas: {} as any, atacado: {} as any },
 		);
 		expect(res.statusInterno).toBe("erro");
 		expect(res.notaOk).toBe(false);

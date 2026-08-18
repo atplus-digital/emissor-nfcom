@@ -92,8 +92,6 @@ async function main() {
 			asaas,
 			nfcom,
 			db,
-			cfop: env.FISCAL_CFOP_DEFAULT,
-			cclass: env.FISCAL_CCLASS_DEFAULT,
 		});
 		const outboxFactory = criarOutboxWorker({ atacado, db });
 		// Agenda o poll do outbox (repeat job a cada 5s — ADR-0002).

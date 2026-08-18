@@ -76,8 +76,6 @@ const inputEmitir: EmitirNFComInput = {
 		cidade: "Curitiba",
 	},
 	itens: [],
-	cfop: "6102",
-	cclass: "123",
 };
 
 describe("nfcom.repository — cache de token", () => {

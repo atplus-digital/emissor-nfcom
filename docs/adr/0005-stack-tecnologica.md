@@ -41,14 +41,14 @@ type-safe, routing idiomático, tamanho pequeno. Alinhado ao runtime do repo.
 
 **Drizzle ORM** (escolhido) — TS-first, schema como código, migrations explícitas,
 queries tipadas, sem gerador de runtime opaco (diferente do Prisma), bom suporte a
-SQLite (`better-sqlite3` / `bun:sqlite`).
+SQLite (`drizzle-orm/libsql` + `@libsql/client`).
 
 - vs **Prisma**: mais popular, mas schema declarativo + gerador opaco + peso de runtime;
   Drizzle é mais "código que você lê".
 - vs **Kysely**: query builder TS-first excelente, mas sem schema/ migrations first-class
   para SQLite; Drizzle cobre schema + migrations nativamente.
 
-**Decisão: Drizzle ORM** sobre `bun:sqlite`.
+**Decisão: Drizzle ORM** sobre SQLite via driver `libsql` (`drizzle-orm/libsql` + `@libsql/client`).
 
 ### Filas (ADR-0002)
 
@@ -87,7 +87,7 @@ schemas de env (`@t3-oss/env-core`) e contratos de domínio.
 | -------------- | ----------------------------------------------- |
 | Runtime        | **Bun** (já no repo)                            |
 | Framework HTTP | **Hono**                                        |
-| ORM            | **Drizzle ORM** sobre `bun:sqlite`              |
+| ORM            | **Drizzle ORM** sobre SQLite via `libsql`              |
 | Filas          | **BullMQ** + **Redis** (`ioredis`)              |
 | HTTP client    | **fetch** nativo + wrapper em `src/lib/http` |
 | Logging        | **pino** (com redação)                          |
@@ -112,7 +112,11 @@ schemas de env (`@t3-oss/env-core`) e contratos de domínio.
 
 - Sem `axios` no projeto — todo HTTP via fetch + wrapper.
 - Acesso a SQLite exclusivamente via Drizzle (sem SQL cru espalhado).
-- Env validado por Zod (`@t3-oss/env-core`), nunca `process.env` direto.
+- Env validado por Zod (`@t3-oss/env-core`), nunca `process.env` direto. Única
+  exceção permitida e registrada: `process.env.NODE_ENV` no factory do logger
+  (`src/lib/logger/index.ts`), usado só para alternar JSON/pretty — importar
+  `src/env.ts` aí dispararia a validação completa de env em todo teste, então
+  `NODE_ENV` (convenção canônica do Node, não config do app) é lida direto.
 
 ## Confirmação
 
@@ -127,7 +131,7 @@ grep -rn "from \"hono\"" src/http/ | wc -l | grep -qv '^0$' || exit 1
 
 ## Notas
 
-- `bun:sqlite` é síncrono (bloqueia o event loop em escritas pesadas); para o volume de
-  um microserviço single-instance é aceitável. Se virar gargalo, migra-se para
-  `better-sqlite3` (também via Drizzle) ou Postgres (ADR-0003).
+- `libsql` (via `drizzle-orm/libsql` + `@libsql/client`) é single-instance — adequado ao
+  volume de um microserviço single-instance. Se virar gargalo, migra-se para outro driver
+  Drizzle ou Postgres (escala, ADR-0003/ADR futuro).
 - BullMQ Board (UI) pode ser exposto em modo admin para observabilidade das filas.

@@ -106,8 +106,6 @@ describe("portas de domínio (contrato que módulos implementam)", () => {
 				cidade: "C",
 			},
 			itens: [],
-			cfop: "6102",
-			cclass: "010101",
 		};
 		// sem campo de referência própria (ApiNFComEmitir additionalProperties:false)
 		expect((input as Record<string, unknown>).externalReference).toBeUndefined();
