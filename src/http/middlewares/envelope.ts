@@ -19,9 +19,17 @@ export const TipoErro = {
 } as const;
 export type TipoErro = (typeof TipoErro)[keyof typeof TipoErro];
 
+/**
+ * Detalhe estruturado do erro no envelope. Abreviação deliberada de
+ * `Record<string, unknown>`: o detalhe é um objeto de payload livre (detalhe de
+ * erro, não tipo de provedor). Intencional e local a este módulo — documenta a
+ * exceção ao ADR-0004 (§ módulos) para o detalhe do envelope.
+ */
+export type ErroDetalhe = Record<string, unknown>;
+
 /** Corpo do envelope canônico. */
 export interface ErroCorpo {
-	erro: { tipo: string; mensagem: string; detalhe: Record<string, unknown> };
+	erro: { tipo: string; mensagem: string; detalhe: ErroDetalhe };
 }
 
 /** Status HTTP default por tipo (CONVENTIONS). */
@@ -39,7 +47,7 @@ const STATUS_POR_TIPO: Record<TipoErro, number> = {
 export function erroResponse(
 	tipo: TipoErro,
 	mensagem: string,
-	detalhe: Record<string, unknown> = {},
+	detalhe: ErroDetalhe = {},
 	status: number = STATUS_POR_TIPO[tipo],
 ): { corpo: ErroCorpo; status: number } {
 	return {
@@ -55,14 +63,14 @@ export function erroResponse(
 export class HttpError extends Error {
 	readonly tipo: TipoErro;
 	readonly status: number;
-	readonly detalhe: Record<string, unknown>;
+	readonly detalhe: ErroDetalhe;
 	/** Mensagem de domínio (espelha Error.message para acesso nominal no envelope). */
 	readonly mensagem: string;
 
 	constructor(
 		tipo: TipoErro,
 		mensagem: string,
-		detalhe: Record<string, unknown> = {},
+		detalhe: ErroDetalhe = {},
 		status: number = STATUS_POR_TIPO[tipo],
 	) {
 		super(mensagem);
