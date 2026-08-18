@@ -1,9 +1,19 @@
 /**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 
+import type { Clientes, ClientesRelations } from "./clientes";
+import type { LinhasFixas, LinhasFixasRelations } from "./linhas-fixas";
+import type {
+	NfcomCobrancas,
+	NfcomCobrancasRelations,
+} from "./nfcom-cobrancas";
+import type { NfcomErros, NfcomErrosRelations } from "./nfcom-erros";
+import type { NfcomFaturas, NfcomFaturasRelations } from "./nfcom-faturas";
+import type { NfcomItens, NfcomItensRelations } from "./nfcom-itens";
+import type { NfcomNotas, NfcomNotasRelations } from "./nfcom-notas";
 import type { AiEmployees, AiEmployeesRelations } from "./other/aiemployees";
 import type {
 	AnexosPortabilidadesDids,
@@ -22,7 +32,6 @@ import type {
 	AnexosTicketsRelations,
 } from "./other/anexos-tickets";
 import type { Cdr, CdrRelations } from "./other/cdr";
-import type { Clientes, ClientesRelations } from "./other/clientes";
 import type {
 	ComentariosServicos,
 	ComentariosServicosRelations,
@@ -47,28 +56,11 @@ import type {
 	LinhaDigitavelPix,
 	LinhaDigitavelPixRelations,
 } from "./other/linha-digitavel-pix";
-import type { LinhasFixas, LinhasFixasRelations } from "./other/linhas-fixas";
 import type { Localidades, LocalidadesRelations } from "./other/localidades";
-import type {
-	NfcomCobrancas,
-	NfcomCobrancasRelations,
-} from "./other/nfcom-cobrancas";
-import type { NfcomErros, NfcomErrosRelations } from "./other/nfcom-erros";
-import type {
-	NfcomFaturas,
-	NfcomFaturasRelations,
-} from "./other/nfcom-faturas";
-import type { NfcomItens, NfcomItensRelations } from "./other/nfcom-itens";
 import type {
 	NfcomItensAdicionais,
 	NfcomItensAdicionaisRelations,
 } from "./other/nfcom-itens-adicionais";
-import type { NfcomNotas, NfcomNotasRelations } from "./other/nfcom-notas";
-import type { Parceiros, ParceirosRelations } from "./other/parceiros";
-import type {
-	PlanosDeServico,
-	PlanosDeServicoRelations,
-} from "./other/planos-de-servico";
 import type { Respostas, RespostasRelations } from "./other/respostas";
 import type { Roles, RolesRelations } from "./other/roles";
 import type {
@@ -86,6 +78,11 @@ import type {
 	TemplatesTicketsRelations,
 } from "./other/templates-tickets";
 import type { Tickets, TicketsRelations } from "./other/tickets";
+import type { Parceiros, ParceirosRelations } from "./parceiros";
+import type {
+	PlanosDeServico,
+	PlanosDeServicoRelations,
+} from "./planos-de-servico";
 import type { Users, UsersRelations } from "./users";
 
 // Tipo union com todas as collections disponíveis

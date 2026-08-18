@@ -1,12 +1,12 @@
 /**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 
 import { z } from "zod";
+import { parceirosBaseSchema } from "../../parceiros/schemas";
 import { usersBaseSchema } from "../../users/schemas";
-import { parceirosBaseSchema } from "../parceiros/schemas";
 import {
 	faturasStatusSchema,
 	faturasSubstatusSchema,

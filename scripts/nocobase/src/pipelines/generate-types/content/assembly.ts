@@ -4,6 +4,7 @@ import type {
 } from "@generators/pipelines/generate-types/@types/generation";
 import type { BaseInterfaceNamingConfig } from "@generators/pipelines/generate-types/@types/script";
 import {
+	toBaseSchemaName,
 	toCollectionConstantPrefix,
 	toFileName,
 } from "@generators/pipelines/generate-types/utils/naming";
@@ -28,7 +29,7 @@ import {
 export function generateFileHeader(): string {
 	return `/**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 `;
@@ -56,14 +57,6 @@ function _ensureValidIdentifier(name: string): string {
 		return `_${name}`;
 	}
 	return name;
-}
-
-function _toBaseSchemaName(collectionName: string): string {
-	const cleanCollectionName = collectionName.replace(/^t_/, "").toLowerCase();
-	if (!cleanCollectionName || cleanCollectionName === "t") {
-		return _ensureValidIdentifier(`${collectionName.toLowerCase()}BaseSchema`);
-	}
-	return _ensureValidIdentifier(`${cleanCollectionName}BaseSchema`);
 }
 
 function generateFieldLabelsMap(
@@ -300,7 +293,7 @@ export function generateSchemasContent(
 			availableCollections.has(target) &&
 			target !== collectionName
 		) {
-			const schemaName = _toBaseSchemaName(target);
+			const schemaName = toBaseSchemaName(target);
 			const targetIsSplitCollection = splitCollectionNames.has(target);
 			const importPath = resolveExternalSchemaImportPath(
 				toFileName(target),

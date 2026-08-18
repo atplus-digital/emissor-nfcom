@@ -176,6 +176,39 @@ export function toCollectionBaseTypeName(
 }
 
 /**
+ * Gera o nome do identificador da const do schema base de uma collection
+ * (ex: `usersBaseSchema`, `linhas_fixasBaseSchema`).
+ *
+ * Strip do prefixo técnico (`t_`/`f_`) e normalização para identificador TS
+ * **válido** via `toValidIdentifier` — hífens/espaços viram `_`. Por isso aceita
+ * tanto o nome real da API (`t_linhas_fixas`) quanto o slug da pasta
+ * (`linhas-fixas`); ambos produzem `linhas_fixasBaseSchema`.
+ *
+ * @param collectionName - Nome da collection (nome real da API ou slug)
+ * @returns Identificador TS válido
+ *
+ * @example
+ * ```typescript
+ * toBaseSchemaName("users")             // "usersBaseSchema"
+ * toBaseSchemaName("t_linhas_fixas")    // "linhas_fixasBaseSchema"
+ * toBaseSchemaName("linhas-fixas")      // "linhas_fixasBaseSchema"
+ * toBaseSchemaName("t_users")           // "usersBaseSchema"
+ * ```
+ */
+export function toBaseSchemaName(collectionName: string): string {
+	// Strip só do prefixo de TABELA (`t_`), não de campo (`f_`). Collections NocoBase
+	// usam `t_`; IXC não usa prefixo. Tirar `f_` aqui colapsaria collections distintas
+	// (ex.: `f_shared` → `sharedBaseSchema` == `t_shared` → `sharedBaseSchema`),
+	// quebrando o agrupamento de imports e a deduplicação de schemas.
+	const cleanCollectionName = collectionName.replace(/^t_/, "").toLowerCase();
+	const baseName =
+		!cleanCollectionName || cleanCollectionName === "t"
+			? `${collectionName.toLowerCase()}BaseSchema`
+			: `${cleanCollectionName}BaseSchema`;
+	return toValidIdentifier(baseName);
+}
+
+/**
  * Converte nome de collection para nome de arquivo kebab-case.
  * Remove prefixo "t_" ou "f_" se presente.
  *

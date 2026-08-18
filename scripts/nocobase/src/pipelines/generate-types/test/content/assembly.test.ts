@@ -17,7 +17,7 @@ describe("assembly exports", () => {
 		it("includes auto-generated warning banner", () => {
 			const header = generateFileHeader();
 			expect(header).toContain("Arquivo gerado automaticamente");
-			expect(header).toContain("pnpm generate-types");
+			expect(header).toContain("bun run generate:types");
 		});
 	});
 

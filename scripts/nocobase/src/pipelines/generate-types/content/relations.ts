@@ -4,7 +4,10 @@ import type {
 	RelationInterface,
 } from "@generators/pipelines/generate-types/@types/generation";
 import type { BaseInterfaceNamingConfig } from "@generators/pipelines/generate-types/@types/script";
-import { toCollectionBaseTypeName } from "@generators/pipelines/generate-types/utils/naming";
+import {
+	toBaseSchemaName,
+	toCollectionBaseTypeName,
+} from "@generators/pipelines/generate-types/utils/naming";
 
 // ============================================================
 // Relation interface resolution
@@ -168,21 +171,6 @@ export function renderRelationValueType(
 	return cardinality === "many" ? `${targetType}[]` : `${targetType} | null`;
 }
 
-function _toBaseSchemaName(collectionName: string): string {
-	const cleanCollectionName = collectionName.replace(/^t_/, "").toLowerCase();
-	if (!cleanCollectionName || cleanCollectionName === "t") {
-		return _ensureValidIdentifier(`${collectionName.toLowerCase()}BaseSchema`);
-	}
-	return _ensureValidIdentifier(`${cleanCollectionName}BaseSchema`);
-}
-
-function _ensureValidIdentifier(name: string): string {
-	if (/^[0-9]/.test(name)) {
-		return `_${name}`;
-	}
-	return name;
-}
-
 /**
  * Gera o tipo Zod para um campo de relação.
  * Usa referências a schemas base quando a collection destino está disponível,
@@ -204,7 +192,7 @@ export function renderRelationZodType(
 		availableCollections.has(targetCollectionTrimmed);
 
 	if (isAvailable) {
-		const targetBaseSchemaName = _toBaseSchemaName(targetCollectionTrimmed);
+		const targetBaseSchemaName = toBaseSchemaName(targetCollectionTrimmed);
 		const relationType =
 			cardinality === "one"
 				? `${targetBaseSchemaName}.nullable()`

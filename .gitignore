@@ -49,3 +49,6 @@ __pycache__/
 *.tgz
 .turbo
 .references
+
+.claude/
+!.claude/skills

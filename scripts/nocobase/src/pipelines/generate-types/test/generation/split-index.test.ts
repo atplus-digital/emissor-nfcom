@@ -33,7 +33,7 @@ describe("generateIndexWithAllExportsWithPaths", () => {
 		expect(content).toMatchInlineSnapshot(`
       "/**
        * Arquivo gerado automaticamente
-       * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+       * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
        * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
        */
       "
@@ -74,6 +74,6 @@ describe("generateIndexWithAllExportsWithPaths", () => {
 		);
 
 		expect(content).toContain("Arquivo gerado automaticamente");
-		expect(content).toContain("pnpm generate-types");
+		expect(content).toContain("bun run generate:types");
 	});
 });

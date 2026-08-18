@@ -5,6 +5,7 @@ import type {
 import type { BaseInterfaceNamingConfig } from "@generators/pipelines/generate-types/@types/script";
 import {
 	formatKey,
+	toBaseSchemaName,
 	toCollectionBaseTypeName,
 	toCollectionTypeName,
 } from "@generators/pipelines/generate-types/utils/naming";
@@ -57,17 +58,6 @@ function ensureValidIdentifier(name: string): string {
 		return `_${name}`;
 	}
 	return name;
-}
-
-/**
- * Gera o nome do schema base para uma collection (ex: usersBaseSchema).
- */
-function toBaseSchemaName(collectionName: string): string {
-	const cleanCollectionName = collectionName.replace(/^t_/, "").toLowerCase();
-	if (!cleanCollectionName || cleanCollectionName === "t") {
-		return ensureValidIdentifier(`${collectionName.toLowerCase()}BaseSchema`);
-	}
-	return ensureValidIdentifier(`${cleanCollectionName}BaseSchema`);
 }
 
 /**

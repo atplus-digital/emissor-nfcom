@@ -1,12 +1,12 @@
 /**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 
 import { z } from "zod";
+import { clientesBaseSchema } from "../../clientes/schemas";
 import { usersBaseSchema } from "../../users/schemas";
-import { clientesBaseSchema } from "../clientes/schemas";
 import { servicos_adicionaisTipoServicoSchema } from "./labels";
 
 export const TABLE_NAME = "t_servicos_adicionais";

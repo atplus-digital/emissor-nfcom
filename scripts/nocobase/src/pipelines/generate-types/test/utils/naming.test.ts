@@ -2,6 +2,7 @@ import {
 	formatKey,
 	removeAccents,
 	resolveBaseInterfaceNamingConfig,
+	toBaseSchemaName,
 	toCollectionBaseTypeName,
 	toCollectionConstantPrefix,
 	toCollectionTypeName,
@@ -112,6 +113,40 @@ describe("naming utilities", () => {
 	describe("toCollectionConstantPrefix", () => {
 		it("strips t_ prefix before screaming snake", () => {
 			expect(toCollectionConstantPrefix("t_pessoas")).toBe("PESSOAS");
+		});
+	});
+
+	describe("toBaseSchemaName", () => {
+		it("derives from real API name with t_ prefix", () => {
+			expect(toBaseSchemaName("t_linhas_fixas")).toBe("linhas_fixasBaseSchema");
+		});
+
+		it("derives from slug kebab (pasta) producing valid identifier", () => {
+			// toFileName("t_linhas_fixas") === "linhas-fixas" — slug deve normalizar
+			// hífens para underscore e gerar identificador TS válido.
+			expect(toBaseSchemaName("linhas-fixas")).toBe("linhas_fixasBaseSchema");
+		});
+
+		it("derives from underscore name without t_ prefix", () => {
+			expect(toBaseSchemaName("cliente_contrato")).toBe(
+				"cliente_contratoBaseSchema",
+			);
+		});
+
+		it("handles plain name without prefix", () => {
+			expect(toBaseSchemaName("users")).toBe("usersBaseSchema");
+		});
+
+		it("preserves f_ prefix (field prefix, not table prefix)", () => {
+			// `f_` é prefixo de campo, não de collection — não deve ser removido,
+			// senão colapsa com a collection sem prefixo.
+			expect(toBaseSchemaName("f_funcionarios")).toBe(
+				"f_funcionariosBaseSchema",
+			);
+		});
+
+		it("prefixes with underscore when name starts with digit", () => {
+			expect(toBaseSchemaName("t_123abc")).toBe("_123abcBaseSchema");
 		});
 	});
 

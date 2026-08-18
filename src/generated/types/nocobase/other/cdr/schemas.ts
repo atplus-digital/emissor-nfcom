@@ -1,12 +1,12 @@
 /**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 
 import { z } from "zod";
+import { linhas_fixasBaseSchema } from "../../linhas-fixas/schemas";
 import { usersBaseSchema } from "../../users/schemas";
-import { linhas_fixasBaseSchema } from "../linhas-fixas/schemas";
 
 export const TABLE_NAME = "t_cdr";
 export const TABLE_LABEL = "CDR";

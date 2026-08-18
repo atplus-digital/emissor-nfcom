@@ -9,6 +9,7 @@ import type {
 	ManualRelationMapping,
 } from "../@types/script";
 import { extractRelationInfo, mapFieldType } from "../content/field-mapper";
+import { toFileName } from "../utils/naming";
 import { resolveCollectionLabel } from "../utils/resolve-collection-label";
 
 const I18N_TEMPLATE_KEY_REGEX = /^\s*\{\{\s*t\(\s*["']([^"']+)["']/;
@@ -141,6 +142,30 @@ function normalizeCollectionNames(collectionNames: string[]): string[] {
 	);
 }
 
+/**
+ * Resolve nomes configurados (de `collections`/`splitCollections`) para os
+ * **nomes reais** retornados pela API do datasource.
+ *
+ * A config pode vir em três formas: nome real da API (`t_linhas_fixas`),
+ * slug kebab da pasta (`linhas-fixas`) ou nome com underscore (`cliente_contrato`).
+ * O pipeline trabalha end-to-end com o nome real; esta função normaliza a entrada
+ * casando por `toFileName` (kebab, sem prefixo `t_`/`f_`) com fallback exact-match.
+ *
+ * Nomes configurados sem correspondência na API são mantidos como-is — o estágio
+ * os marca como `schemaAvailable=false` (orphan), sem inventar nome.
+ */
+function resolveToApiNames(
+	configuredNames: string[],
+	apiCollections: DataSourceCollection[],
+): string[] {
+	const byFileName = new Map<string, string>();
+	for (const c of apiCollections) {
+		byFileName.set(toFileName(c.name), c.name);
+	}
+
+	return configuredNames.map((name) => byFileName.get(toFileName(name)) ?? name);
+}
+
 function resolveSplitDependents(
 	apiCollections: DataSourceCollection[],
 	splitCollectionNames: string[],
@@ -269,10 +294,19 @@ export async function fetchSchemas(
 		);
 	}
 
-	// 1. Resolve collection names from config
+	// 1. Resolve collection names from config.
+	// Configured names (slug kebab, underscore, or real API name) are normalized
+	// to the REAL API name so lookups downstream (by apiCollection.name) match.
+	const configuredSplitCollections = resolveToApiNames(
+		normalizeCollectionNames(dataSource.splitCollections ?? []),
+		apiCollections,
+	);
 	const explicitCollections = normalizeCollectionNames([
-		...(dataSource.collections ?? []),
-		...(dataSource.splitCollections ?? []),
+		...resolveToApiNames(
+			normalizeCollectionNames(dataSource.collections ?? []),
+			apiCollections,
+		),
+		...configuredSplitCollections,
 	]);
 	const includeAllCollections = dataSource.includeAllCollections === true;
 	const includeDependents =
@@ -281,7 +315,7 @@ export async function fetchSchemas(
 	const dependentCollections = includeDependents
 		? resolveSplitDependents(
 				apiCollections,
-				dataSource.splitCollections ?? [],
+				configuredSplitCollections,
 				pipelineCtx.relations,
 				inferRelationsByName,
 			)
@@ -445,6 +479,12 @@ export async function fetchSchemas(
 
 	return {
 		...context,
+		// Propaga splitCollections resolvido (nomes reais da API) para que
+		// build-types caspasse as chaves de collectionTypes (também nomes reais).
+		runtimeConfig: {
+			...dataSource,
+			splitCollections: configuredSplitCollections,
+		},
 		pipelineContext: {
 			...pipelineCtx,
 			collections: (includeDependents

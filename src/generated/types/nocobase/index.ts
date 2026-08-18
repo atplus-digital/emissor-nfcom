@@ -1,9 +1,44 @@
 /**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 
+export type {
+	Clientes,
+	ClientesRelationKey,
+	ClientesRelations,
+} from "./clientes";
+export type {
+	LinhasFixas,
+	LinhasFixasRelationKey,
+	LinhasFixasRelations,
+} from "./linhas-fixas";
+export type {
+	NfcomCobrancas,
+	NfcomCobrancasRelationKey,
+	NfcomCobrancasRelations,
+} from "./nfcom-cobrancas";
+export type {
+	NfcomErros,
+	NfcomErrosRelationKey,
+	NfcomErrosRelations,
+} from "./nfcom-erros";
+export type {
+	NfcomFaturas,
+	NfcomFaturasRelationKey,
+	NfcomFaturasRelations,
+} from "./nfcom-faturas";
+export type {
+	NfcomItens,
+	NfcomItensRelationKey,
+	NfcomItensRelations,
+} from "./nfcom-itens";
+export type {
+	NfcomNotas,
+	NfcomNotasRelationKey,
+	NfcomNotasRelations,
+} from "./nfcom-notas";
 export type {
 	AiEmployees,
 	AiEmployeesRelationKey,
@@ -30,11 +65,6 @@ export type {
 	AnexosTicketsRelations,
 } from "./other/anexos-tickets";
 export type { Cdr, CdrRelationKey, CdrRelations } from "./other/cdr";
-export type {
-	Clientes,
-	ClientesRelationKey,
-	ClientesRelations,
-} from "./other/clientes";
 export type {
 	ComentariosServicos,
 	ComentariosServicosRelationKey,
@@ -77,55 +107,15 @@ export type {
 	LinhaDigitavelPixRelations,
 } from "./other/linha-digitavel-pix";
 export type {
-	LinhasFixas,
-	LinhasFixasRelationKey,
-	LinhasFixasRelations,
-} from "./other/linhas-fixas";
-export type {
 	Localidades,
 	LocalidadesRelationKey,
 	LocalidadesRelations,
 } from "./other/localidades";
 export type {
-	NfcomCobrancas,
-	NfcomCobrancasRelationKey,
-	NfcomCobrancasRelations,
-} from "./other/nfcom-cobrancas";
-export type {
-	NfcomErros,
-	NfcomErrosRelationKey,
-	NfcomErrosRelations,
-} from "./other/nfcom-erros";
-export type {
-	NfcomFaturas,
-	NfcomFaturasRelationKey,
-	NfcomFaturasRelations,
-} from "./other/nfcom-faturas";
-export type {
-	NfcomItens,
-	NfcomItensRelationKey,
-	NfcomItensRelations,
-} from "./other/nfcom-itens";
-export type {
 	NfcomItensAdicionais,
 	NfcomItensAdicionaisRelationKey,
 	NfcomItensAdicionaisRelations,
 } from "./other/nfcom-itens-adicionais";
-export type {
-	NfcomNotas,
-	NfcomNotasRelationKey,
-	NfcomNotasRelations,
-} from "./other/nfcom-notas";
-export type {
-	Parceiros,
-	ParceirosRelationKey,
-	ParceirosRelations,
-} from "./other/parceiros";
-export type {
-	PlanosDeServico,
-	PlanosDeServicoRelationKey,
-	PlanosDeServicoRelations,
-} from "./other/planos-de-servico";
 export type {
 	Respostas,
 	RespostasRelationKey,
@@ -162,4 +152,14 @@ export type {
 	TicketsRelationKey,
 	TicketsRelations,
 } from "./other/tickets";
+export type {
+	Parceiros,
+	ParceirosRelationKey,
+	ParceirosRelations,
+} from "./parceiros";
+export type {
+	PlanosDeServico,
+	PlanosDeServicoRelationKey,
+	PlanosDeServicoRelations,
+} from "./planos-de-servico";
 export type { Users, UsersRelationKey, UsersRelations } from "./users";

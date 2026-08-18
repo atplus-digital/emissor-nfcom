@@ -1,12 +1,12 @@
 /**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 
 import { z } from "zod";
+import { nfcom_cobrancasBaseSchema } from "../../nfcom-cobrancas/schemas";
 import { usersBaseSchema } from "../../users/schemas";
-import { nfcom_cobrancasBaseSchema } from "../nfcom-cobrancas/schemas";
 
 export const TABLE_NAME = "t_nfcom_itens_adicionais";
 export const TABLE_LABEL = "Itens Adicionais";

@@ -889,4 +889,117 @@ describe("fetchSchemas stage", () => {
 			result.pipelineContext?.collectionTypes?.users?.fieldLabels.get("custom"),
 		).toBe('{{ t("UnknownKey") }}');
 	});
+
+	it("resolves splitCollection slug (kebab) to real API name and fetches schema", async () => {
+		// Config usa o slug da pasta "linhas-fixas"; a API retorna "t_linhas_fixas".
+		// O estágio deve resolver para o nome real, popular o schema com os campos
+		// reais (não vazio) e key collectionTypes pelo nome real da API.
+		const fetchCollections = vi.fn().mockResolvedValue([
+			{
+				name: "t_linhas_fixas",
+				fields: [
+					createMockField({ name: "id", type: "integer", interface: "id" }),
+					createMockField({
+						name: "f_assinatura",
+						type: "integer",
+						interface: "number",
+					}),
+				],
+			},
+		]);
+
+		const context = createPipelineContext({
+			runtimeConfig: {
+				collections: [],
+				splitCollections: ["linhas-fixas"],
+				includeDependents: false,
+			},
+			pipelineContext: {
+				client: { baseUrl: "http://localhost", fetchCollections },
+			},
+		});
+
+		const result = await fetchSchemas(context, createMockTask());
+
+		// collectionTypes keyado pelo nome real da API, com scalars populados.
+		expect(
+			result.pipelineContext?.collectionTypes?.t_linhas_fixas,
+		).toBeDefined();
+		expect(
+			result.pipelineContext?.collectionTypes?.t_linhas_fixas?.scalars.get(
+				"id",
+			),
+		).toBe("number");
+		expect(
+			result.pipelineContext?.collectionTypes?.t_linhas_fixas?.scalars.get(
+				"f_assinatura",
+			),
+		).toBe("number");
+		expect(
+			result.pipelineContext?.collectionTypes?.t_linhas_fixas?.schemaAvailable,
+		).toBe(true);
+
+		// runtimeConfig.splitCollections propagado resolvido (nome real).
+		expect(result.runtimeConfig?.splitCollections).toEqual(["t_linhas_fixas"]);
+	});
+
+	it("resolves explicit collection slug (kebab) to real API name", async () => {
+		const fetchCollections = vi.fn().mockResolvedValue([
+			{
+				name: "t_nfcom_notas",
+				fields: [createMockField({ name: "id", type: "integer" })],
+			},
+		]);
+
+		const context = createPipelineContext({
+			runtimeConfig: {
+				collections: ["nfcom-notas"],
+				splitCollections: [],
+			},
+			pipelineContext: {
+				client: { baseUrl: "http://localhost", fetchCollections },
+			},
+		});
+
+		const result = await fetchSchemas(context, createMockTask());
+
+		expect(
+			result.pipelineContext?.collectionTypes?.t_nfcom_notas,
+		).toBeDefined();
+		expect(
+			result.pipelineContext?.collectionTypes?.t_nfcom_notas?.schemaAvailable,
+		).toBe(true);
+	});
+
+	it("resolves underscore splitCollection name without t_ prefix (IXC pattern)", async () => {
+		// IXC retorna "cliente_contrato" (sem t_); config com mesmo nome deve casar.
+		const fetchCollections = vi.fn().mockResolvedValue([
+			{
+				name: "cliente_contrato",
+				fields: [createMockField({ name: "id", type: "integer" })],
+			},
+		]);
+
+		const context = createPipelineContext({
+			runtimeConfig: {
+				collections: [],
+				splitCollections: ["cliente_contrato"],
+				includeDependents: false,
+			},
+			pipelineContext: {
+				client: { baseUrl: "http://localhost", fetchCollections },
+			},
+		});
+
+		const result = await fetchSchemas(context, createMockTask());
+
+		expect(
+			result.pipelineContext?.collectionTypes?.cliente_contrato,
+		).toBeDefined();
+		expect(
+			result.pipelineContext?.collectionTypes?.cliente_contrato?.scalars.get(
+				"id",
+			),
+		).toBe("number");
+	});
 });

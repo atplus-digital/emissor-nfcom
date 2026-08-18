@@ -1,16 +1,16 @@
 /**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 
 import { z } from "zod";
+import { clientesBaseSchema } from "../../clientes/schemas";
+import { linhas_fixasBaseSchema } from "../../linhas-fixas/schemas";
+import { parceirosBaseSchema } from "../../parceiros/schemas";
 import { usersBaseSchema } from "../../users/schemas";
 import { anexos_ticketsBaseSchema } from "../anexos-tickets/schemas";
-import { clientesBaseSchema } from "../clientes/schemas";
-import { linhas_fixasBaseSchema } from "../linhas-fixas/schemas";
 import { localidadesBaseSchema } from "../localidades/schemas";
-import { parceirosBaseSchema } from "../parceiros/schemas";
 import { tags_ticketsBaseSchema } from "../tags-tickets/schemas";
 import {
 	ticketsDepartamentoSchema,

@@ -1,14 +1,14 @@
 /**
  * Arquivo gerado automaticamente
- * NÃO EDITAR MANUALMENTE - usar: pnpm generate-types
+ * NÃO EDITAR MANUALMENTE - usar: bun run generate:types
  * biome-ignore-all lint/suspicious/noEmptyInterface: auto-generated
  */
 
 import { z } from "zod";
 import { aiemployeesBaseSchema } from "../other/aiemployees/schemas";
 import { departmentsBaseSchema } from "../other/departments/schemas";
-import { parceirosBaseSchema } from "../other/parceiros/schemas";
 import { rolesBaseSchema } from "../other/roles/schemas";
+import { parceirosBaseSchema } from "../parceiros/schemas";
 
 export const TABLE_NAME = "users";
 export const TABLE_LABEL = "users";
