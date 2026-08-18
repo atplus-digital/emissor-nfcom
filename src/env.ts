@@ -30,7 +30,7 @@ const _env = createEnv({
 		NFCOM_SENHA: z.string().min(1),
 
 		// Webhook de saída (SPEC-0001 passo 6; vazio = não empurra, caso 14)
-		WEBHOOK_URL: z.url().default(""),
+		WEBHOOK_URL: z.union([z.literal(""), z.url()]).default(""),
 		WEBHOOK_SECRET: z.string().default(""),
 		
 		// Rate-limit por gateway em req/s (ADR-0002)

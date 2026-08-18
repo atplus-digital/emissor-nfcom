@@ -79,8 +79,12 @@ export interface AtualizarStatusNotaInput {
 	serie?: number;
 	chave?: string;
 	protocolo?: string;
+	/** Ambiente SEFAZ da emissão (produção/homologação) — `f_ambiente`. */
+	ambiente?: number;
 	pdfUrl?: string;
 	xmlUrl?: string;
+	/** QR Code Pix da nota — `f_qrcodepix`. */
+	pixUrl?: string;
 }
 
 export interface RegistrarErroInput {
@@ -100,6 +104,11 @@ export interface AtacadoPort {
 		parceiroId: number,
 		dataReferencia: string,
 	): Promise<Fatura | null>;
+	/**
+	 * Carrega a fatura com a árvore completa (cobranças + notas + itens) por id.
+	 * Retorna `null` quando o id não existe (404 do Atacado).
+	 */
+	getFaturaPorId(id: number): Promise<Fatura | null>;
 
 	// Criação da árvore (direta, com rollback manual — SPEC-0002)
 	criarFatura(input: CriarFaturaInput): Promise<{ id: number }>;
