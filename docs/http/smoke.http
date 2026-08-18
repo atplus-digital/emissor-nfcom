@@ -45,7 +45,7 @@ X-API-Key: {{apiKey}}
 {
   "parceiroId": {{parceiroId}},
   "dataReferencia": "{{dataReferencia}}",
-  "tipoFaturamento": "parceiro"
+  "tipoFaturamento": "cliente-final"
 }
 
 # --- Casos de erro da preparação (para conferir o envelope) ---
