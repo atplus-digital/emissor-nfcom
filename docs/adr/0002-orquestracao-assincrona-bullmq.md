@@ -102,8 +102,16 @@ emit-fatura ─┬─ emit-cobranca ─┬─ emit-nfcom
              └─ ...            └─ ...
 ```
 
-Cada job é uma unidade idempotente (ADR-0003). Filas separadas por gateway permitem
-rate-limit independente (`atacado`, `asaas`, `nfcom`).
+Cada job é uma unidade idempotente (ADR-0003). A árvore de emissão vive numa ÚNICA
+fila `emissao` — BullMQ **Flows exige parent/child na MESMA fila**, então não dá para
+separar `asaas`/`nfcom` em filas distintas sem abrir mão da árvore parent/child
+(fatura → cobrança → nfcom). O rate-limit independente por gateway é alcançado no
+nível da **chamada externa**: cada provedor é serializado por um `RateLimiter` próprio
+(`src/lib/rate-limit.ts`, sliding window 1s, max = env `RATE_LIMIT_*` do provedor),
+aplicado no composition root via proxy sobre `AsaasPort`/`NfcomPort`. Assim Asaas e
+NFCom respeitam cada um a sua env, independente da fila — o ADR honrado na
+granularidade que importa (o rate-limiter da fila estrangularia o Asaas ao teto do
+NFCom).
 
 **Outbox relay**: além das filas de emissão, há uma fila `outbox` cujo job drena a tabela
 `outbox` do SQLite (ADR-0003) e entrega as mudanças de estado ao Atacado (entrega
@@ -115,13 +123,13 @@ não teria quem a drenasse.
 **Rate-limit por gateway**: configurado por variáveis de ambiente com defaults
 conservadores (`RATE_LIMIT_ASAAS`, `RATE_LIMIT_NFCOM`, `RATE_LIMIT_ATACADO` em req/s),
 validadas por Zod (`@t3-oss/env-core`, ADR-0005). Defaults ajustados em produção conforme
-observação de 429s. Cada fila BullMQ usa o rate-limiter nativo com o valor da env
-correspondente. O rate-limiter do BullMQ é **por fila**, não por gateway global: a fila
-`asaas` agrupa jobs cujas escritas externas são no Asaas, a `nfcom` no gateway NFCom e a
-`atacado`/`outbox-relay` no Atacado. Cada job de emissão escreve primariamente num único
-provedor (as escritas no Atacado saem pelo outbox-relay), então o rate-limit da fila
-aproxima o limite do provedor; se um provedor vier a ser tocado de duas filas, o limite
-agregado é a soma das filas — observar em produção (429s).
+observação de 429s. A implementação NÃO usa o rate-limiter nativo do BullMQ (por fila)
+— a árvore single-`emissao` impediria rate-limit por provedor e estrangularia o Asaas
+ao teto do NFCom. Em vez disso, aplica um `RateLimiter` **por provedor** na chamada
+externa (`src/lib/rate-limit.ts`), de modo que cada escritura no provedor respeita a sua
+env independente da fila. A fila `emissao` sai sem `limiter` (só `concurrency`); os
+workers de `outbox-relay`/`atacado` e `webhook` seguem sem estrangulamento por fila.
+Observe 429s em produção e ajuste as envs.
 
 **Workers e single-instance**: por ora, workers BullMQ rodam no mesmo processo
 single-instance do SQLite (ADR-0003). SQLite não é compartilhado entre pods; escalar a
@@ -154,7 +162,8 @@ job em andamento com **timeout de 30s** antes de sair.
 
 - Emissão sobrevive a restart; jobs órfãos são retomados.
 - Retry isolado por cobrança/nota, com backoff exponencial.
-- Rate-limit por gateway configurável por fila.
+- Rate-limit por gateway configurável (na chamada externa, via `RateLimiter` por
+  provedor — ver "Rate-limit por gateway" na Decisão).
 - Observabilidade de estado por job (BullMQ Board / métricas).
 
 **Negativas:**

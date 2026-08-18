@@ -6,13 +6,14 @@ import { QUEUE_NAMES, type QueueName } from "#/lib/queue-names";
 /**
  * Fábrica de filas BullMQ (ADR-0002). Filas são cacheadas por nome no processo.
  *
- * Rate-limit por gateway (ADR-0002): o rate-limiter do BullMQ é **por fila**. A fila
- * agrupa jobs cujas escritas externas tocam primariamente um provedor, e o limite da
- * fila aproxima o limite do provedor. `rateLimitFor(provider)` devolve as opções de
- * rate-limit para o provedor a partir das envs `RATE_LIMIT_*` (req/s → max/duration ms).
- * Workers (Fase 4) aplicam o rate-limit apropriado ao construírem o Worker; se um
- * provedor vier a ser tocado de duas filas, o limite agregado é a soma das filas —
- * observar em produção (429s).
+ * Rate-limit por gateway (ADR-0002): a árvore de emissão vive numa ÚNICA fila
+ * `emissao` porque BullMQ Flows exige parent/child na MESMA fila — separar por
+ * provedor quebraria o Flow. Por isso o rate-limit por gateway NÃO é feito na fila:
+ * é aplicado **na chamada externa** via `RateLimiter` por provedor (`src/lib/rate-limit.ts`),
+ * com a env `RATE_LIMIT_*` de cada um. `rateLimitFor` segue existindo para quem
+ * queira derivar opções BullMQ a partir da env (defaults de worker/limite), mas o
+ * estrangulamento real por gateway é no nível de porta. Ver `emissao.worker.ts` e o
+ * composition root (`src/index.ts`) p/ o wiring.
  */
 
 export type GatewayProvider = "asaas" | "nfcom" | "atacado";

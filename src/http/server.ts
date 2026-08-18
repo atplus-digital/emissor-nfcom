@@ -13,7 +13,8 @@ import type { AtacadoPort } from "#/domain/ports/atacado.port";
 import type { QueuePort } from "#/domain/ports/queue.port";
 import type { DefaultsFiscais } from "#/domain/fatura/defaults-fiscais";
 import { criarFaturasRoutes } from "#/http/routes/faturas.route";
-import { criarHealthRoute } from "#/http/routes/health.route";
+import { criarHealthRoute, pingSqlite } from "#/http/routes/health.route";
+import type { CoordDB } from "#/lib/db/client";
 import { apiKeyMiddleware } from "#/http/middlewares/api-key";
 import { requestLogMiddleware } from "#/http/middlewares/request-log";
 import { errorHandler } from "#/http/middlewares/error-handler";
@@ -25,6 +26,8 @@ export interface AppDeps {
 	apiKey: string;
 	/** Defaults fiscais (env.FISCAL_* ligado pelo composition root). */
 	defaultsFiscais?: DefaultsFiscais;
+	/** DB de coordenação p/ o ping do /health (ADR-0002). Injete ou omita p/ liveness puro. */
+	db?: CoordDB;
 }
 
 /**
@@ -38,8 +41,9 @@ export function criarApp(deps: AppDeps): Hono {
 	app.use("*", requestLogMiddleware());
 	app.onError(errorHandler());
 
-	// Health é público (liveness — não exige auth; ADR-0002).
-	app.route("/", criarHealthRoute());
+	// Health é público (liveness — não exige auth; ADR-0002). O ping do SQLite é
+	// ligado quando o composition root injeta o `db`; senão liveness puro.
+	app.route("/", criarHealthRoute(deps.db ? pingSqlite(deps.db) : undefined));
 
 	// Rotas protegidas por API key
 	app.use("*", apiKeyMiddleware(deps.apiKey));

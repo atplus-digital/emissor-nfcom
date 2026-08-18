@@ -541,7 +541,7 @@ export function criarEmissaoWorker(deps: EmissaoDeps): EmissaoWorkers {
 	// consolida o estado final da fatura via getChildrenValues — sem contador
 	// manual no SQLite (ADR-0002).
 	const wiring = (async () => {
-		const [{ Worker, FlowProducer }, { getQueue, WORKER_DEFAULTS, rateLimitFor }, { getRedis }, { QUEUE_NAMES, JOB_NAMES }] =
+		const [{ Worker, FlowProducer }, { getQueue, WORKER_DEFAULTS }, { getRedis }, { QUEUE_NAMES, JOB_NAMES }] =
 			await Promise.all([
 				import("bullmq"),
 				import("#/lib/queues"),
@@ -552,31 +552,23 @@ export function criarEmissaoWorker(deps: EmissaoDeps): EmissaoWorkers {
 		const flowProducer = new FlowProducer({ connection });
 		const queue = getQueue(QUEUE_NAMES.EMISSAO);
 
-		// enqueueFilho: adiciona um child ao Flow do parent. O parent é identificado
-		// pelo (parentKey = queue:jobId). Para emit-cobranca (child de emit-fatura) e
-		// emit-nfcom (child de emit-cobranca), usamos addFlow com a relação parent/child.
-		// Como os handlers chamam enqueueFilho incrementalmente (uma cobrança por vez),
-		// usamos queue.add com a opção `parent` para ligar o child ao parent em andamento.
-		const enqueueFilho = async (name: string, data: unknown): Promise<void> => {
-			const jobName = name as (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
-			// `parent` é resolvido pelo composition-root wrapper que injeta o parentKey/parentId
-			// via closure do job corrente (ver Worker handler abaixo).
-			const parent = currentParent.get("parent");
-			if (parent) {
-				await queue.add(jobName, data, { ...WORKER_DEFAULTS, parent });
-			} else {
-				await queue.add(jobName, data, WORKER_DEFAULTS);
-			}
-		};
+		// enqueueFilho: adiciona um child ao Flow do parent. O parent é resolvido
+		// **por job** (closure), não por Map global — seguro p/ concurrency>1: cada
+		// job carrega o seu próprio parentKey, então duas árvores emitindo em paralelo
+		// não sobrescrevem o parent uma da outra (ADR-0002). Ligamos o child ao parent
+		// em andamento via `queue.add(..., { parent })`.
+		const enqueueFilhoPara = (parent: { id: string; queue: string } | null) =>
+			async (name: string, data: unknown): Promise<void> => {
+				const jobName = name as (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
+				if (parent) {
+					await queue.add(jobName, data, { ...WORKER_DEFAULTS, parent });
+				} else {
+					await queue.add(jobName, data, WORKER_DEFAULTS);
+				}
+			};
 
-		// Contexto por-job do parent corrente (p/ enqueueFilho ligar o child). É
-		// per-thread/async-safe porque o Worker processa um job por vez por concorrência.
-		const currentParent = new Map<string, { id: string; queue: string }>();
-
-		const workerDeps: EmissaoDeps = {
-			...deps,
-			enqueueFilho,
-		};
+		const workerDepsPara = (enqueueFilho?: EmissaoDeps["enqueueFilho"]): EmissaoDeps =>
+			enqueueFilho ? { ...deps, enqueueFilho } : deps;
 
 		const worker = new Worker(
 			QUEUE_NAMES.EMISSAO,
@@ -590,37 +582,29 @@ export function criarEmissaoWorker(deps: EmissaoDeps): EmissaoWorkers {
 						// Segunda passada: consolida o estado final da fatura.
 						return consolidarFaturaOuCobranca(job, childrenValues, deps);
 					}
-					// Primeira passada: fan-out. Define o parent corrente p/ enqueueFilho.
-					currentParent.set("parent", { id: job.id ?? "", queue: QUEUE_NAMES.EMISSAO });
-					try {
-						return await handleEmitFatura(job as unknown as JobLike<EmitFaturaData>, workerDeps);
-					} finally {
-						currentParent.delete("parent");
-					}
+					// Primeira passada: fan-out. Enfileira os children com ESTE job como
+					// parent (per-job, não global — segue a concorrência).
+					const enqueueFilho = enqueueFilhoPara({ id: job.id ?? "", queue: QUEUE_NAMES.EMISSAO });
+					return await handleEmitFatura(job as unknown as JobLike<EmitFaturaData>, workerDepsPara(enqueueFilho));
 				}
 				if (jobName === JOB_NAMES.EMIT_COBRANCA) {
-					// emit-cobranca: fan-out de emit-nfcom. Define parent p/ os nfcom.
-					currentParent.set("parent", { id: job.id ?? "", queue: QUEUE_NAMES.EMISSAO });
-					try {
-						const result = await handleEmitCobranca(job as unknown as JobLike<EmitCobrancaData>, workerDeps);
-						return result;
-					} finally {
-						currentParent.delete("parent");
-					}
+					// emit-cobranca: fan-out de emit-nfcom com ESTE job como parent.
+					const enqueueFilho = enqueueFilhoPara({ id: job.id ?? "", queue: QUEUE_NAMES.EMISSAO });
+					return await handleEmitCobranca(job as unknown as JobLike<EmitCobrancaData>, workerDepsPara(enqueueFilho));
 				}
 				if (jobName === JOB_NAMES.EMIT_NFCOM) {
-					return handleEmitNfcom(job as unknown as JobLike<EmitNfcomData>, workerDeps);
+					return handleEmitNfcom(job as unknown as JobLike<EmitNfcomData>, workerDepsPara(undefined));
 				}
 				throw new ErroFatal(`job desconhecido na fila emissao: ${jobName}`);
 			},
 			{
 				connection,
 				...WORKER_DEFAULTS,
-				// Rate-limit: a fila emissao toca Asaas e NFCom. Aplicamos o limite
-				// mais conservador (NFCom, 2 req/s) como teto de concorrência da fila;
-				// os provedores têm seus próprios limites e o Asaas aguenta mais.
-				// Documentado: observar 429s em produção e ajustar (ADR-0002).
-				limiter: rateLimitFor("nfcom"),
+				// Sem limiter de fila: o rate-limit por gateway é aplicado na chamada
+				// externa (src/lib/rate-limit.ts) — cada provedor com a sua env
+				// (RATE_LIMIT_ASAAS/NFCOM/ATACADO). Limitar a fila estrangularia o Asaas
+				// ao teto do NFCom sem o Flow poder separar as filas (ADR-0002).
+				concurrency: 5,
 			},
 		);
 

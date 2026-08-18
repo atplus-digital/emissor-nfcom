@@ -17,6 +17,7 @@ import { getDb } from "#/lib/db/client";
 import { getRedis } from "#/lib/redis";
 import { getQueue, WORKER_DEFAULTS, gracefulShutdown } from "#/lib/queues";
 import { QUEUE_NAMES, JOB_NAMES } from "#/lib/queue-names";
+import { createRateLimiter, wrapWithRateLimit } from "#/lib/rate-limit";
 import { criarApp } from "#/http/server";
 import { createAtacadoClient } from "#/modules/atacado/atacado.client";
 import { AtacadoRepository } from "#/modules/atacado/atacado.repository";
@@ -46,15 +47,29 @@ async function main() {
 		const redis = getRedis();
 
 		// 3. Repositories (ACLs — ADR-0004). Env ligado aqui (lazy nos clients).
+		// Rate-limit por gateway (ADR-0002): cada provedor respeita a sua env
+		// (RATE_LIMIT_ASAAS/NFCOM/ATACADO) no nível da CHAMADA EXTERNA — a árvore
+		// BullMQ Flows vive numa única fila `emissao` (parent/child na mesma fila),
+		// então o limite não pode ser por fila. O proxy serializa cada método da
+		// porta pelo limiter do provedor (src/lib/rate-limit.ts).
 		const atacadoClient = createAtacadoClient();
-		const atacado: AtacadoPort = new AtacadoRepository(atacadoClient);
+		const atacado: AtacadoPort = wrapWithRateLimit(
+			new AtacadoRepository(atacadoClient),
+			createRateLimiter(env.RATE_LIMIT_ATACADO),
+		);
 		const asaasClient = createAsaasClient();
-		const asaas: AsaasPort = new AsaasRepository(asaasClient);
+		const asaas: AsaasPort = wrapWithRateLimit(
+			new AsaasRepository(asaasClient),
+			createRateLimiter(env.RATE_LIMIT_ASAAS),
+		);
 		const nfcomClient = criarNfcomClient();
-		const nfcom: NfcomPort = criarNfcomRepository({
-			client: nfcomClient,
-			credenciais: { login: env.NFCOM_LOGIN, senha: env.NFCOM_SENHA },
-		});
+		const nfcom: NfcomPort = wrapWithRateLimit(
+			criarNfcomRepository({
+				client: nfcomClient,
+				credenciais: { login: env.NFCOM_LOGIN, senha: env.NFCOM_SENHA },
+			}),
+			createRateLimiter(env.RATE_LIMIT_NFCOM),
+		);
 
 		// 4. QueuePort: enfileira emissão de fatura + webhook (SPEC-0001).
 		const queue: QueuePort = {
@@ -79,6 +94,7 @@ async function main() {
 			atacado,
 			queue,
 			apiKey: env.EMISSOR_API_KEY,
+			db,
 			defaultsFiscais: {
 				cfop: env.FISCAL_CFOP_DEFAULT,
 				cclass: env.FISCAL_CCLASS_DEFAULT,
