@@ -38,9 +38,9 @@ com idempotência/outbox (SQLite). Stack: Bun + Hono + Drizzle + Zod 4. Interno 
 ```bash
 cp .env.example .env            # preencher keys (Asaas, NFCom, Atacado...)
 bun install
-docker run -d -p 6379:6379 redis:7   # Redis local p/ BullMQ
-bunx drizzle-kit migrate         # cria/migra o SQLite de coordenação
-bun run dev                     # Hono :3000 + workers (bun --watch)
+bun run dev     # docker compose up: Redis + app (Hono :3000 + workers, bun --watch)
+                # — migra o SQLite de coordenação no boot (drizzle-kit migrate)
+# Sem Docker: bun dev:native (Redis à parte; requer bunx drizzle-kit migrate)
 ```
 
 ## Como validar (DoD global do repo)

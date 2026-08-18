@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+#
+# Imagem de DEV: instala as deps numa camada cacheada e roda `bun --watch` com o
+# source montado via volume (compose.yaml). Produção usa o Dockerfile (bundle
+# autocontido em dist/) — este aqui NÃO serve para deploy.
+#
+# Single-instance (ADR-0002/0003): o pod de dev é um só container de app + um
+# Redis irmão; nunca escalar réplicas (SQLite de coordenação não é compartilhável).
+
+FROM oven/bun:1.3.14
+
+WORKDIR /app
+
+# Cache de dependências — só re-instala quando package.json/bun.lock mudam.
+# O node_modules fica na camada da imagem; o compose preserva-o via volume
+# anônimo (/app/node_modules) para o bind mount de ./:/app não o sobrescrever.
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+# Usuário não-root (UID 1000 — mesmo UID do `ubuntu` no host, então o bind mount
+# de ./ :/app é gravável pelo `bun` sem atrito de permissões).
+USER bun
+
+EXPOSE 3000

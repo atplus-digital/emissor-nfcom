@@ -1,0 +1,54 @@
+# Dev local: sobe Redis + app (com hot-reload via `bun --watch`) num único pod.
+# `bun dev` roda `docker compose up`. Produção usa só o Dockerfile (bundle
+# autocontido); este compose é tooling de desenvolvimento.
+#
+# Single-instance (ADR-0002/0003): NÃO escalar réplicas — o SQLite de coordenação
+# (/app/data) não é compartilhável entre pods.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Sem `ports`: o Redis fica só na rede interna do compose (serviço `redis`).
+    # O app o alcança via redis://redis:6379. Evita conflito com containers Redis
+    # órfãos no host (ex: emissor-test-redis) que ocupariam a porta 6379.
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      # Override do .env: dentro do compose o Redis é o serviço `redis`, não
+      # localhost. Os demais secrets vêm do .env via env_file.
+      REDIS_URL: redis://redis:6379
+      # O app escuta em env.PORT (default 3000, mas o .env local sobrescreve p/
+      # 4649). Forçamos 3000 para bater com o port map `3000:3000` abaixo e com
+      # o EXPOSE 3000 do Dockerfile — o host alcança a API em localhost:3000.
+      PORT: "3000"
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+    volumes:
+      # Source montado para o `bun --watch` refletir edições locais a quente.
+      - ./:/app
+      # Preserva o node_modules da imagem (bind mount não o sobrescreve).
+      - /app/node_modules
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Migra o SQLite de coordenação (idempotente, ADR-0009) antes de subir o
+    # server — espelha o CMD do Dockerfile de produção.
+    command: sh -c "mkdir -p data && bunx drizzle-kit migrate && bun --watch src/index.ts"
+
+volumes:
+  redis-data:
