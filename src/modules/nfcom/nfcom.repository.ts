@@ -99,9 +99,9 @@ export function criarNfcomRepository(
 		async emitirNFCom(input) {
 			return emitirComRetry(input);
 		},
-		async consultarLista(cpfcnpj, dataInicio, dataFim) {
+		async consultarLista(cpfcnpj, inicio, fim) {
 			const token = await obterToken();
-			const itens = await client.consultaLista(token, cpfcnpj, dataInicio, dataFim);
+			const itens = await client.consultaLista(token, cpfcnpj, inicio, fim);
 			return itens.map<NFComListaItem>((i) => ({
 				chave: i.chave,
 				situacao: i.situacao,

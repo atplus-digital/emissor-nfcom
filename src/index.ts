@@ -108,6 +108,9 @@ async function main() {
 			asaas,
 			nfcom,
 			db,
+			// QueuePort compartilhada p/ enfileirar eventos de webhook a cada mudança
+			// de estado (C3). WEBHOOK_URL vazia → no-op (caso 14).
+			queue,
 		});
 		const outboxFactory = criarOutboxWorker({ atacado, db });
 		// Agenda o poll do outbox (repeat job a cada 5s — ADR-0002).

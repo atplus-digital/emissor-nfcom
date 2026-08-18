@@ -7,9 +7,19 @@
  * - `emit-cobranca` (child): idempotência `cobranca:{id}:boleto` (consult-before-re-emit,
  *   caso 5), customer buscar/atualizar (caso 16), boleto; fan-out de `emit-nfcom`
  *   por nota — **mesmo se o boleto falhar** (caso 18: nota independe do boleto).
+ *   Tem 2 passadas (M1): (1) boleto + fan-out das notas; (2) quando as notas
+ *   (children) completam, coleta os `ResultadoEmitNfcom` via `getChildrenValues`
+ *   e devolve o `ResultadoEmitCobranca` final com `notasOk[]` REAIS — permitindo
+ *   ao parent consolidar a fatura pela nota, não pelo boolean do boleto
+ *   (conserta casos 7/10/11/18).
  * - `emit-nfcom` (child): idempotência `nfcom:{id}:emitir` (caso 15: não re-emite em
  *   retry pós-crash → erro+inspeção), mapeamento situacao (casos 6/7), reauth 401
- *   transparente (caso 9, no módulo NFCom).
+ *   transparente (caso 9, no módulo NFCom). "processando" (caso 6) exausto → a nota
+ *   vai a `erro` via outbox (caso 17 / M2).
+ *
+ * Webhook (C3): cada mudança de estado relevante (fatura emitindo/emitida/parcial/
+ * erro, cobranca emitida, nfcom emitida/erro) enfileira `EventoWebhook` via
+ * `QueuePort.enfileirarWebhook` — no-op quando WEBHOOK_URL vazia (caso 14).
  *
  * Handlers são funções puras `(job, deps)` para testar SEM Redis — o wiring BullMQ
  * (Worker/Flow/addChild) é uma camada fina em `criarEmissaoWorker`.
@@ -22,13 +32,16 @@ import {
 import { acquireLease, reassumirLeaseSeStale, releaseLease } from "#/lib/db/lease";
 import { enqueueOutbox } from "#/lib/db/outbox";
 import { mapearSituacaoNota } from "#/domain/emissao/situacao";
-import { consolidarFatura, type ResultadoCobranca } from "#/domain/emissao/consolidacao";
+import { consolidarFatura, hojeEmSP, type ResultadoCobranca } from "#/domain/emissao/consolidacao";
 import { runWithLogContext, log } from "#/lib/logger";
 import type { AtacadoPort } from "#/domain/ports/atacado.port";
 import type { AsaasPort } from "#/domain/ports/asaas.port";
 import type { NfcomPort } from "#/domain/ports/nfcom.port";
+import type { QueuePort } from "#/domain/ports/queue.port";
+import { calcularEventoId } from "#/workers/webhook.worker";
 import type {
 	Cobranca,
+	EventoWebhook,
 	Fatura,
 	Item,
 	Nota,
@@ -52,16 +65,21 @@ export class ErroFatal extends Error {
 	}
 }
 
+/** Nº default de tentativas (espelha WORKER_DEFAULTS.attempts, sem importar env). */
+const ATTEMPTS_DEFAULT = 5;
+
 /** Job data do parent `emit-fatura`. */
 export interface EmitFaturaData {
 	faturaId: number;
-	parceiroId: number;
-	dataReferencia: string;
+	/** Opcional por compat (C2): o caminho de produção carrega a fatura por id (`getFaturaPorId`). */
+	parceiroId?: number;
+	dataReferencia?: string;
 }
 
 /** Job data do child `emit-cobranca`. */
 export interface EmitCobrancaData {
 	cobrancaId: number;
+	faturaId: number;
 	valorTotal: number;
 	documentoDevedor: string;
 	nomeDevedor: string;
@@ -137,8 +155,13 @@ export interface EmissaoDeps {
 	db: import("#/lib/db/client").CoordDB;
 	/** Enfileira um job filho (fan-out). Testes stubbam; o wiring BullMQ implementa. */
 	enqueueFilho?: (name: string, data: unknown) => Promise<void>;
-	/** Carrega a fatura com árvore (cobranças + notas). Default via atacado.buscarFaturaPorChave. */
+	/** Carrega a fatura com árvore (cobranças + notas). Default via atacado.getFaturaPorId (C2). */
 	carregarFatura?: (faturaId: number, parceiroId: number, dataReferencia: string) => Promise<Fatura | null>;
+	/**
+	 * QueuePort p/ enfileirar eventos de webhook (C3) a cada mudança de estado.
+	 * No-op quando ausente (testes sem webhook) ou quando WEBHOOK_URL vazia.
+	 */
+	queue?: QueuePort;
 	/**
 	 * Limiar de staleness do lease (ms). Se o lease está sendo há mais que isso,
 	 * assume-se morto (BullMQ stalled/failed) e reassume (SPEC-0001 caso 2).
@@ -152,6 +175,60 @@ function helperDb(db: EmissaoDeps["db"]) {
 	return db;
 }
 
+/** É a última tentativa do job (M2: exaurido → não retryar, marcar erro). */
+function ehUltimaTentativa(job: JobLike): boolean {
+	const attempts = job.opts.attempts ?? ATTEMPTS_DEFAULT;
+	return job.attemptsMade + 1 >= attempts;
+}
+
+/**
+ * Enfileira um evento de webhook (C3). `eventoId` determinístico por
+ * `(faturaId, alvo, estado, timestamp)`. No-op quando `deps.queue` ausente.
+ */
+async function enfileirarEventoWebhook(
+	deps: EmissaoDeps,
+	args: {
+		faturaId: number;
+		tipo: EventoWebhook["tipo"];
+		alvo: EventoWebhook["alvo"];
+		estado: string;
+		erros?: EventoWebhook["erros"];
+	},
+): Promise<void> {
+	if (!deps.queue) return;
+	const timestamp = new Date().toISOString();
+	const evento: EventoWebhook = {
+		eventoId: "",
+		faturaId: args.faturaId,
+		tipo: args.tipo,
+		alvo: args.alvo,
+		estado: args.estado,
+		erros: args.erros,
+		timestamp,
+	};
+	evento.eventoId = calcularEventoId(evento);
+	await deps.queue.enfileirarWebhook(evento);
+}
+
+/** Marca a nota `erro` via outbox + registra o erro (usado nos caminhos de falha). */
+async function marcarNotaErroEOutbox(
+	db: EmissaoDeps["db"],
+	notaId: number,
+	erro: string,
+	mensagem: string,
+): Promise<void> {
+	await enqueueOutbox(db, {
+		aggregate: "nota",
+		aggregateId: notaId,
+		payload: { op: "atualizarStatusNota", id: notaId, statusInterno: "erro" },
+	});
+	await enqueueOutbox(db, {
+		aggregate: "erro",
+		aggregateId: notaId,
+		payload: { op: "registrarErro", notaId, erro, mensagem },
+	});
+}
+
 // ============================================================
 // Handler: emit-fatura (parent)
 // ============================================================
@@ -161,18 +238,25 @@ export interface ResultadoEmitFatura {
 }
 
 /**
- * Parent: adquire lease, marca `emitindo`, fan-out cobranças, consolida.
- * O callback de consolidação roda quando toda a árvore resolve — aqui
- * modelado como: o parent enfileira os filhos e o resultado final é derivado
- * pelos resultados que os filhos reportam (via um mecanismo de coleta). P/ manter
- * testável sem Redis, a consolidação é feita quando o parent recebe os
- * resultados dos filhos de volta (chamada `consolidar` abaixo).
+ * Parent: adquire lease, marca `emitindo`, fan-out cobranças. O callback de
+ * consolidação roda quando toda a árvore resolve (segunda passada no wiring).
+ *
+ * Caso M3: se 0 cobranças a-emitir (todas já emitidas, ou assassinadas), não há
+ * children → não há segunda passada → o lease ficaria preso. Consolida `emitida`
+ * imediatamente e libera o lease aqui, retornando `{enfileiradas: 0}`.
+ *
+ * `ErroFatal` (fatura não encontrada) libera o lease via catch (m1) — ainda não há
+ * children para drenar a consolidação.
+ *
+ * C2: o carregador default usa `atacado.getFaturaPorId(faturaId)` (canônico) em vez
+ * de `buscarFaturaPorChave(parceiroId, dataReferencia)` — o job enfileirado só
+ * precisa carregar `{faturaId}`.
  */
 export async function handleEmitFatura(
 	job: JobLike<EmitFaturaData>,
 	deps: EmissaoDeps,
 ): Promise<{ enfileiradas: number }> {
-	const { faturaId, parceiroId, dataReferencia } = job.data;
+	const { faturaId } = job.data;
 	return runWithLogContext({ faturaId, jobId: job.id, fila: "emissao" }, async () => {
 		const db = helperDb(deps.db);
 		let acquired = await acquireLease(db, faturaId);
@@ -188,32 +272,66 @@ export async function handleEmitFatura(
 			acquired = true;
 			log.warn({ faturaId }, "lease stale reassumido (job anterior presumido morto)");
 		}
-		// carrega a fatura
-		const carregar = deps.carregarFatura ?? (async (id, p, dr) => deps.atacado.buscarFaturaPorChave(p, dr));
-		const fatura = await carregar(faturaId, parceiroId, dataReferencia);
-		if (!fatura) {
-			await releaseLease(db, faturaId);
-			throw new ErroFatal(`fatura ${faturaId} não encontrada`);
+		try {
+			// C2: default carrega por id (canônico). `parceiroId`/`dataReferencia` ficam
+			// órfãos no job, mas o default não depende deles.
+			const carregar = deps.carregarFatura ?? ((id: number) => deps.atacado.getFaturaPorId(id));
+			const fatura = await carregar(faturaId, job.data.parceiroId ?? 0, job.data.dataReferencia ?? "");
+			if (!fatura) {
+				// m1: ErroFatal na 1ª passada — nenhum child para drenar a consolidação.
+				throw new ErroFatal(`fatura ${faturaId} não encontrada`);
+			}
+			// marca emitindo via outbox + webhook
+			await enqueueOutbox(db, {
+				aggregate: "fatura",
+				aggregateId: faturaId,
+				payload: { op: "atualizarStatusFatura", id: faturaId, status: "emitindo" },
+			});
+			await enfileirarEventoWebhook(deps, {
+				faturaId,
+				tipo: "fatura.status",
+				alvo: { faturaId },
+				estado: "emitindo",
+			});
+			// fan-out cobranças a-emitir
+			const cobrancasAEmitir = fatura.cobrancas.filter((c) => c.status === "a-emitir");
+			if (cobrancasAEmitir.length === 0) {
+				// M3: todas já emitidas → sem children → consolida `emitida` agora e
+				// libera o lease (não haverá segunda passada para fazê-lo).
+				log.info({ faturaId }, "0 cobranças a-emitir — consolidando emitida imediatamente (M3)");
+				await enqueueOutbox(db, {
+					aggregate: "fatura",
+					aggregateId: faturaId,
+					payload: { op: "atualizarStatusFatura", id: faturaId, status: "emitida" },
+				});
+				await enfileirarEventoWebhook(deps, {
+					faturaId,
+					tipo: "fatura.status",
+					alvo: { faturaId },
+					estado: "emitida",
+				});
+				await releaseLease(db, faturaId);
+				return { enfileiradas: 0 };
+			}
+			const enqueue = deps.enqueueFilho ?? (async () => {});
+			for (const c of cobrancasAEmitir) {
+				await enqueue("emit-cobranca", toCobrancaData(c));
+			}
+			return { enfileiradas: cobrancasAEmitir.length };
+		} catch (err) {
+			// m1: ErroFatal na 1ª passada → libera o lease (sem children para drenar).
+			if (err instanceof ErroFatal) {
+				await releaseLease(db, faturaId);
+			}
+			throw err;
 		}
-		// marca emitindo via outbox
-		await enqueueOutbox(db, {
-			aggregate: "fatura",
-			aggregateId: faturaId,
-			payload: { op: "atualizarStatusFatura", id: faturaId, status: "emitindo" },
-		});
-		// fan-out cobranças a-emitir
-		const cobrancasAEmitir = fatura.cobrancas.filter((c) => c.status === "a-emitir");
-		const enqueue = deps.enqueueFilho ?? (async () => {});
-		for (const c of cobrancasAEmitir) {
-			await enqueue("emit-cobranca", toCobrancaData(c));
-		}
-		return { enfileiradas: cobrancasAEmitir.length };
 	});
 }
 
 function toCobrancaData(c: Cobranca): EmitCobrancaData {
 	return {
 		cobrancaId: c.id!,
+		faturaId: c.faturaId,
 		valorTotal: c.valorTotal,
 		documentoDevedor: c.documentoDevedor,
 		nomeDevedor: c.nomeDevedor,
@@ -243,22 +361,30 @@ function toResumoNota(n: Nota): ResumoNota {
 }
 
 // ============================================================
-// Handler: emit-cobranca (child)
+// Handler: emit-cobranca (child) — 1ª passada (boleto + fan-out notas)
 // ============================================================
 
 export interface ResultadoEmitCobranca {
 	boletoOk: boolean;
-	notasEnfileiradas: number;
+	/** Resultados REAIS das notas (emit-nfcom children) — coletados na 2ª passada (M1). */
+	notasOk: boolean[];
 	erro?: string;
 }
 
+/**
+ * Primeira passada do `emit-cobranca`: idempotência do boleto (caso 5), customer
+ * buscar/atualizar (caso 16), e fan-out de `emit-nfcom` por nota — **mesmo se o
+ * boleto falhar** (caso 18). Retorna quantas notas enfileirou; o resultado final
+ * (`notasOk[]`) é derivado na segunda passada (`consolidarCobranca`) quando as
+ * notas (children) completam.
+ */
 export async function handleEmitCobranca(
 	job: JobLike<EmitCobrancaData>,
 	deps: EmissaoDeps,
-): Promise<ResultadoEmitCobranca> {
+): Promise<{ boletoOk: boolean; notasEnfileiradas: number; erro?: string }> {
 	const d = job.data;
 	const db = helperDb(deps.db);
-	const { asaas, atacado } = deps;
+	const { asaas } = deps;
 	return runWithLogContext({ jobId: job.id, fila: "emissao" }, async () => {
 		const key = `cobranca:${d.cobrancaId}:boleto`;
 		let boletoOk = false;
@@ -271,7 +397,7 @@ export async function handleEmitCobranca(
 				const ref = `cobranca:${d.cobrancaId}`;
 				const existente = await asaas.consultarBoletoPorExternalReference(ref);
 				const linkFatura = existente?.linkFatura ?? "";
-				await commitCobranca(atacado, db, d.cobrancaId, acquired.externalId, linkFatura);
+				await commitCobranca(deps, db, d, acquired.externalId, linkFatura);
 				boletoOk = true;
 			} else {
 				// in_progress: pode ser 1ª tentativa OU retry pós-crash (caso 5)
@@ -279,7 +405,7 @@ export async function handleEmitCobranca(
 				if (existing) {
 					// boleto já existe no Asaas (criado antes do crash) → resolve, não duplica
 					await resolveKey(db, key, existing.idExterno);
-					await commitCobranca(atacado, db, d.cobrancaId, existing.idExterno, existing.linkFatura);
+					await commitCobranca(deps, db, d, existing.idExterno, existing.linkFatura);
 					boletoOk = true;
 				} else {
 					// não existe → cria customer + boleto
@@ -291,7 +417,7 @@ export async function handleEmitCobranca(
 						externalReference: `cobranca:${d.cobrancaId}`,
 					});
 					await resolveKey(db, key, boleto.idExterno);
-					await commitCobranca(atacado, db, d.cobrancaId, boleto.idExterno, boleto.linkFatura);
+					await commitCobranca(deps, db, d, boleto.idExterno, boleto.linkFatura);
 					boletoOk = true;
 				}
 			}
@@ -321,6 +447,37 @@ export async function handleEmitCobranca(
 	});
 }
 
+/**
+ * Segunda passada do `emit-cobranca` (M1): quando os `emit-nfcom` (children)
+ * completam, o BullMQ reativa o job e expõe os resultados via `getChildrenValues`.
+ * Coleta os `ResultadoEmitNfcom` reais → `notasOk[]` no `ResultadoEmitCobranca`
+ * final. O parent (`emit-fatura`) então consolida pela nota verdadeira, não por um
+ * boolean aproximado do boleto.
+ *
+ * Decisão (documentada — M1): em vez de uma tabela leve de resultados no SQLite,
+ * prefere-se a coleta via Flow `getChildrenValues`, mantendo a árvore BullMQ
+ * autocontida (ADR-0002) e sem escrita extra no banco de coordenação. O `boletoOk`
+ * aqui é re-derivado da key `cobranca:{id}:boleto` (resolved ⇒ boleto emitido) —
+ * o resultado do boleto foi persistido na 1ª passada.
+ */
+export async function consolidarCobranca(
+	job: JobLike<EmitCobrancaData>,
+	childrenValues: Record<string, ResultadoEmitNfcom>,
+	deps: EmissaoDeps,
+): Promise<ResultadoEmitCobranca> {
+	const d = job.data;
+	const db = helperDb(deps.db);
+	const key = `cobranca:${d.cobrancaId}:boleto`;
+	const boleto = await acquireKey(db, key, "asaas");
+	const boletoOk = boleto.status === "resolved";
+	const notasOk = Object.values(childrenValues).map((r) => r.notaOk);
+	log.info(
+		{ cobrancaId: d.cobrancaId, boletoOk, notasOk: notasOk.length },
+		"cobranca consolidada (2ª passada) — notasOk reais do grandchildren",
+	);
+	return { boletoOk, notasOk, erro: boletoOk ? undefined : "boleto não emitido" };
+}
+
 async function ensureCustomer(
 	asaas: AsaasPort,
 	doc: string,
@@ -336,22 +493,32 @@ async function ensureCustomer(
 	return asaas.criarCustomer({ name: nome, email, cpfCnpj: doc });
 }
 
+/**
+ * Marca a cobrança `emitida` via outbox (dataEmissao em America/Sao_Paulo — M9)
+ * e enfileira o webhook `cobranca.status=emitida` (C3).
+ */
 async function commitCobranca(
-	atacado: AtacadoPort,
+	deps: EmissaoDeps,
 	db: import("#/lib/db/client").CoordDB,
-	cobrancaId: number,
+	d: EmitCobrancaData,
 	idExterno: string,
 	linkFatura: string,
 ) {
 	await enqueueOutbox(db, {
 		aggregate: "cobranca",
-		aggregateId: cobrancaId,
+		aggregateId: d.cobrancaId,
 		payload: {
 			op: "atualizarStatusCobranca",
-			id: cobrancaId,
+			id: d.cobrancaId,
 			status: "emitida",
-			extra: { idExterno, linkFatura, dataEmissao: new Date().toISOString().slice(0, 10) },
+			extra: { idExterno, linkFatura, dataEmissao: hojeEmSP() },
 		},
+	});
+	await enfileirarEventoWebhook(deps, {
+		faturaId: d.faturaId,
+		tipo: "cobranca.status",
+		alvo: { cobrancaId: d.cobrancaId },
+		estado: "emitida",
 	});
 }
 
@@ -394,15 +561,31 @@ export async function handleEmitNfcom(
 ): Promise<ResultadoEmitNfcom> {
 	const d = job.data;
 	const db = helperDb(deps.db);
-	const { nfcom, atacado } = deps;
+	const { nfcom } = deps;
 	return runWithLogContext({ jobId: job.id, fila: "emissao" }, async () => {
+		const webhookNota = async (estado: string, erros?: EventoWebhook["erros"]) =>
+			enfileirarEventoWebhook(deps, {
+				faturaId: d.faturaId,
+				tipo: "nfcom.situacao",
+				alvo: { cobrancaId: d.cobrancaId, notaId: d.notaId },
+				estado,
+				erros,
+			});
 		const key = `nfcom:${d.notaId}:emitir`;
 		const acquired = await acquireKey(db, key, "nfcom");
 		if (acquired.status === "resolved") {
 			// sentinel "processando": o gateway ack o POST e está processando (caso 6).
 			// Não é um crash (caso 15) — o POST sucedeu. Continua retrying até o gateway
-			// devolver situação final (ou exaurir tentativas → caso 17). Não re-emite.
+			// devolver situação final; na última tentativa, marca `erro` (caso 17 / M2).
 			if (acquired.externalId === "processando") {
+				if (ehUltimaTentativa(job)) {
+					// M2: exauriu as tentativas com o gateway ainda processando → erro via outbox.
+					const msg = `nota ${d.notaId} ainda processando no gateway após esgotar tentativas`;
+					await marcarNotaErroEOutbox(db, d.notaId, "NFCOM_PROCESSANDO", msg);
+					await webhookNota("erro", [{ cobrancaId: d.cobrancaId, tipo: "FATAL", mensagem: msg }]);
+					log.error({ notaId: d.notaId }, msg);
+					return { notaOk: false, statusInterno: "erro", erro: msg };
+				}
 				throw new ErroRetryable(`nota ${d.notaId} ainda processando no gateway`);
 			}
 			// nota já emitida → reutiliza chave/protocolo
@@ -411,22 +594,15 @@ export async function handleEmitNfcom(
 				aggregateId: d.notaId,
 				payload: { op: "atualizarStatusNota", id: d.notaId, statusInterno: "emitida" },
 			});
+			await webhookNota("emitida");
 			return { notaOk: true, statusInterno: "emitida" };
 		}
 		// in_progress: se é retry (attemptsMade > 0) e ainda não resolvido → caso 15
 		// (crash entre POST e resolveKey). NÃO re-emite → erro + inspeção.
 		if (job.attemptsMade > 0 && acquired.status === "in_progress") {
 			const msg = "suspeita de emissão (crash pós-POST) — inspeção manual via /api/lista";
-			await enqueueOutbox(db, {
-				aggregate: "nota",
-				aggregateId: d.notaId,
-				payload: { op: "atualizarStatusNota", id: d.notaId, statusInterno: "erro" },
-			});
-			await enqueueOutbox(db, {
-				aggregate: "erro",
-				aggregateId: d.notaId,
-				payload: { op: "registrarErro", notaId: d.notaId, erro: "NFCOM_DEDUP", mensagem: msg },
-			});
+			await marcarNotaErroEOutbox(db, d.notaId, "NFCOM_DEDUP", msg);
+			await webhookNota("erro", [{ cobrancaId: d.cobrancaId, tipo: "FATAL", mensagem: msg }]);
 			log.warn({ notaId: d.notaId }, "nota marcada como erro p/ inspeção (caso 15)");
 			return { notaOk: false, statusInterno: "erro", erro: msg };
 		}
@@ -459,9 +635,21 @@ export async function handleEmitNfcom(
 				// para que um retry NÃO re-emita (zero duplicação) nem dispare o caso 15
 				// (que é para crash sem ack do gateway). Continua retrying até situação final.
 				await resolveKey(db, key, "processando");
+				if (ehUltimaTentativa(job)) {
+					// M2: exauriu com o gateway processando mesmo após o emitir → erro via outbox.
+					const msg = `nota ${d.notaId} processando no gateway após esgotar tentativas`;
+					await marcarNotaErroEOutbox(db, d.notaId, "NFCOM_PROCESSANDO", msg);
+					await webhookNota("erro", [{ cobrancaId: d.cobrancaId, tipo: "FATAL", mensagem: msg }]);
+					log.error({ notaId: d.notaId }, msg);
+					return { notaOk: false, statusInterno: "erro", erro: msg };
+				}
 				throw new ErroRetryable(`nota ${d.notaId} processando no gateway`);
 			}
-			await resolveKey(db, key, res.chave);
+			// resolve a key SÓ se a chave SEFAZ veio (situações não-autorizadas como
+			// `rejeitada` podem não retornar chave — fields [opt] no swagger). Sem chave,
+			// não há o que deduplicar por externalId; a proteção anti-duplicação segue no
+			// sentinel em `idempotency_keys` (caso 15) e no retry controlado do BullMQ.
+			if (res.chave) await resolveKey(db, key, res.chave);
 			await enqueueOutbox(db, {
 				aggregate: "nota",
 				aggregateId: d.notaId,
@@ -474,11 +662,14 @@ export async function handleEmitNfcom(
 					serie: res.serie,
 					chave: res.chave,
 					protocolo: res.protocolo,
+					ambiente: res.ambiente,
 					pdfUrl: res.pdfUrl,
 					xmlUrl: res.xmlUrl,
+					pixUrl: res.pixUrl,
 				},
 			});
 			const ok = map.statusInterno === "emitida";
+			await webhookNota(ok ? "emitida" : (map.situacao ?? "erro"));
 			return { notaOk: ok, statusInterno: map.statusInterno };
 		} catch (err) {
 			if (err instanceof ErroRetryable) {
@@ -487,16 +678,8 @@ export async function handleEmitNfcom(
 			}
 			// erro local (timeout/rede/401 exausto) ou fatal reportado pelo gateway
 			const msg = err instanceof Error ? err.message : String(err);
-			await enqueueOutbox(db, {
-				aggregate: "nota",
-				aggregateId: d.notaId,
-				payload: { op: "atualizarStatusNota", id: d.notaId, statusInterno: "erro" },
-			});
-			await enqueueOutbox(db, {
-				aggregate: "erro",
-				aggregateId: d.notaId,
-				payload: { op: "registrarErro", notaId: d.notaId, erro: "NFCOM", mensagem: msg },
-			});
+			await marcarNotaErroEOutbox(db, d.notaId, "NFCOM", msg);
+			await webhookNota("erro", [{ cobrancaId: d.cobrancaId, tipo: "FATAL", mensagem: msg }]);
 			log.error({ err, notaId: d.notaId }, "emissão de nota falhou");
 			return { notaOk: false, statusInterno: "erro", erro: msg };
 		}
@@ -536,11 +719,34 @@ export function criarEmissaoWorker(deps: EmissaoDeps): EmissaoWorkers {
 	// Árvore do Flow (ADR-0002): emit-fatura (parent) → emit-cobranca (children)
 	// → emit-nfcom (children do emit-cobranca). O BullMQ só completa o parent
 	// quando TODOS os children transitivos resolvem (sucesso ou falha exausta).
-	// O handler do parent roda duas vezes: (1) fan-out (enfileira cobranças) e
-	// move p/ waiting-children; (2) quando os children completam, reativa e
-	// consolida o estado final da fatura via getChildrenValues — sem contador
-	// manual no SQLite (ADR-0002).
-	const wiring = (async () => {
+	// Cada job tem 2 passadas: (1) fan-out (enfileira children) e move p/
+	// waiting-children; (2) quando os children completam, reativa e consolida via
+	// getChildrenValues — sem contador manual no SQLite (ADR-0002). Isso vale tanto
+	// para `emit-fatura` (consolida a fatura) quanto para `emit-cobranca` (coleta os
+	// ResultadoEmitNfcom → notasOk[], M1).
+	/**
+ * Lê os `returnvalue`s dos children via `getChildrenValues`, com retry curto.
+ * Race BullMQ (C4): o parent é reativado quando os children completam, mas o
+ * `returnvalue` final do child pode não estar visível no instante exato do
+ * reprocessamento (child faz 2 passadas; o valor final só persiste ao fim).
+ * Sem o retry, o parent cai no fan-out de novo, `acquireLease` falha (lease da
+ * 1ª passada ainda lá) e "pula" — a consolidação nunca roda. Retry curto (até
+ * ~500ms) resolve sem custo perceptível quando os valores já estão disponíveis.
+ */
+async function getChildrenValuesComRetry<T>(
+	job: import("bullmq").Job,
+	retries = 10,
+	delayMs = 50,
+): Promise<Record<string, T> | undefined> {
+	for (let i = 0; i < retries; i++) {
+		const cv = await job.getChildrenValues<T>();
+		if (cv && Object.keys(cv).length > 0) return cv;
+		await new Promise((r) => setTimeout(r, delayMs));
+	}
+	return job.getChildrenValues<T>();
+}
+
+const wiring = (async () => {
 		const [{ Worker, FlowProducer }, { getQueue, WORKER_DEFAULTS }, { getRedis }, { QUEUE_NAMES, JOB_NAMES }] =
 			await Promise.all([
 				import("bullmq"),
@@ -573,29 +779,56 @@ export function criarEmissaoWorker(deps: EmissaoDeps): EmissaoWorkers {
 		const worker = new Worker(
 			QUEUE_NAMES.EMISSAO,
 			async (job) => {
-				const jobName = job.name as string;
-				// Parent (emit-fatura): se tem children values disponíveis (segunda
-				// passada, após children completarem) → consolida. Senão → fan-out.
-				if (jobName === JOB_NAMES.EMIT_FATURA) {
-					const childrenValues = await job.getChildrenValues<ResultadoEmitCobranca>();
-					if (childrenValues && Object.keys(childrenValues).length > 0) {
-						// Segunda passada: consolida o estado final da fatura.
-						return consolidarFaturaOuCobranca(job, childrenValues, deps);
+				// M8: logs o erro final UMA vez com fila+jobId antes de re-propagar
+				// (BullMQ retenta), no estilo do outbox.worker (ADR-0008).
+				try {
+					const jobName = job.name as string;
+					// Parent (emit-fatura): se tem children values disponíveis (segunda
+					// passada, após children completarem) → consolida. Senão → fan-out.
+					if (jobName === JOB_NAMES.EMIT_FATURA) {
+						// Parent tem 2 passadas (ADR-0002): 1ª fan-out cobranças; 2ª (após
+						// children completarem) consolida o estado final. Distinguimos pelas
+						// `childrenValues` (returnvalue dos children): se há, é a 2ª passada.
+						//
+						// Race BullMQ: o parent é reativado quando os children completam, mas o
+						// `returnvalue` do child pode não estar visível em `getChildrenValues`
+						// no instante exato do reprocessamento (o child faz 2 passadas p/
+						// consolidar suas notas, e o `returnvalue` final só persiste ao fim).
+						// Retry curto evita cair no fan-out de novo (que tentaria re-adquirir o
+						// lease e "pularia", deixando a fatura sem consolidação).
+						const childrenValues = await getChildrenValuesComRetry<ResultadoEmitCobranca>(job);
+						if (childrenValues && Object.keys(childrenValues).length > 0) {
+							return consolidarFaturaOuCobranca(job, childrenValues, deps);
+						}
+						// Primeira passada: fan-out. Enfileira os children com ESTE job como
+						// parent (per-job, não global — segue a concorrência).
+						const enqueueFilho = enqueueFilhoPara({ id: job.id ?? "", queue: queue.qualifiedName });
+						return await handleEmitFatura(job as unknown as JobLike<EmitFaturaData>, workerDepsPara(enqueueFilho));
 					}
-					// Primeira passada: fan-out. Enfileira os children com ESTE job como
-					// parent (per-job, não global — segue a concorrência).
-					const enqueueFilho = enqueueFilhoPara({ id: job.id ?? "", queue: QUEUE_NAMES.EMISSAO });
-					return await handleEmitFatura(job as unknown as JobLike<EmitFaturaData>, workerDepsPara(enqueueFilho));
+					if (jobName === JOB_NAMES.EMIT_COBRANCA) {
+						// emit-cobranca tem 2 passadas (M1), igual o parent: 1ª fan-out das
+						// notas; 2ª (após notas completarem) coleta os ResultadoEmitNfcom e
+						// devolve o ResultadoEmitCobranca final com notasOk[] reais.
+						const childrenValues = await getChildrenValuesComRetry<ResultadoEmitNfcom>(job);
+						if (childrenValues && Object.keys(childrenValues).length > 0) {
+							return consolidarCobranca(job as unknown as JobLike<EmitCobrancaData>, childrenValues, deps);
+						}
+						const enqueueFilho = enqueueFilhoPara({ id: job.id ?? "", queue: queue.qualifiedName });
+						return await handleEmitCobranca(job as unknown as JobLike<EmitCobrancaData>, workerDepsPara(enqueueFilho));
+					}
+					if (jobName === JOB_NAMES.EMIT_NFCOM) {
+						return handleEmitNfcom(job as unknown as JobLike<EmitNfcomData>, workerDepsPara(undefined));
+					}
+					throw new ErroFatal(`job desconhecido na fila emissao: ${jobName}`);
+				} catch (err) {
+					// M8: loga o erro final UMA vez com fila+jobId; re-propaga para o
+					// BullMQ decidir retry (ErroRetryable) ou falha (ErroFatal/exausto).
+					log.error(
+						{ err, fila: "emissao", jobId: job.id ?? "" },
+						"job falhou (BullMQ retenta) — erro de emissão",
+					);
+					throw err;
 				}
-				if (jobName === JOB_NAMES.EMIT_COBRANCA) {
-					// emit-cobranca: fan-out de emit-nfcom com ESTE job como parent.
-					const enqueueFilho = enqueueFilhoPara({ id: job.id ?? "", queue: QUEUE_NAMES.EMISSAO });
-					return await handleEmitCobranca(job as unknown as JobLike<EmitCobrancaData>, workerDepsPara(enqueueFilho));
-				}
-				if (jobName === JOB_NAMES.EMIT_NFCOM) {
-					return handleEmitNfcom(job as unknown as JobLike<EmitNfcomData>, workerDepsPara(undefined));
-				}
-				throw new ErroFatal(`job desconhecido na fila emissao: ${jobName}`);
 			},
 			{
 				connection,
@@ -632,40 +865,36 @@ export function criarEmissaoWorker(deps: EmissaoDeps): EmissaoWorkers {
 /**
  * Consolida o estado final da fatura a partir dos children values do Flow
  * (segunda passada do parent). Os children de emit-fatura são os emit-cobranca,
- * cada um com `ResultadoEmitCobranca { boletoOk, notasEnfileiradas, erro? }`.
- * Para saber o `notasOk[]` (sucesso de cada nota), precisaríamos dos children
- * de cada emit-cobranca (os emit-nfcom) — o BullMQ expõe via getChildrenValues
- * no job do emit-cobranca, não no parent. Como simplificação pragmática do
- * primeiro ciclo, derivamos `notasOk` da `notasEnfileiradas` + `erro`: se a
- * cobranca não teve erro e enfileirou notas, consideramos ok (a consolidação
- * fina por nota exigiria agregar os ResultadoEmitNfcom dos grandchildren, o
- * que o BullMQ não expõe diretamente no parent).
- *
- * TODO (futuro): agregar ResultadoEmitNfcom dos grandchildren via um step
- * intermediário ou evento, p/ consolidação nota-a-nota exata.
+ * cada um com `ResultadoEmitCobranca { boletoOk, notasOk[], erro? }` — onde
+ * `notasOk[]` agora são os resultados REAIS dos emit-nfcom (grandchildren),
+ * coletados na 2ª passada do emit-cobranca (M1) via getChildrenValues. Assim a
+ * fatura consolida pela nota verdadeira (casos 7/10/11/18), não por uma
+ * aproximação do boleto. Exportado p/ teste do contrato de consolidação por
+ * grandchildren (M1) sem depender do Redis.
  */
-async function consolidarFaturaOuCobranca(
-	job: import("bullmq").Job,
+export async function consolidarFaturaOuCobranca(
+	job: { data: EmitFaturaData },
 	childrenValues: Record<string, ResultadoEmitCobranca>,
 	deps: EmissaoDeps,
 ): Promise<{ status: StatusFatura }> {
 	const data = job.data as EmitFaturaData;
 	const db = helperDb(deps.db);
-	const resultados: ResultadoCobranca[] = Object.entries(childrenValues).map(([, v]) => {
-		// Sem acesso aos grandchildren no parent: approxima `notasOk` do boolean
-		// `notasEnfileiradas > 0 && !erro` (a cobranca foi bem).
-		const cobrancaOk = v.boletoOk && !v.erro && v.notasEnfileiradas >= 0;
-		return {
-			cobrancaId: 0, // não temos o id mapeado aqui (children key é opaca)
-			boletoOk: v.boletoOk,
-			notasOk: v.notasEnfileiradas > 0 ? [cobrancaOk] : [],
-		};
-	});
+	const resultados: ResultadoCobranca[] = Object.entries(childrenValues).map(([, v]) => ({
+		cobrancaId: 0, // não temos o id mapeado aqui (children key é opaca)
+		boletoOk: v.boletoOk,
+		notasOk: v.notasOk ?? [],
+	}));
 	const status = consolidar(resultados);
 	await enqueueOutbox(db, {
 		aggregate: "fatura",
 		aggregateId: data.faturaId,
 		payload: { op: "atualizarStatusFatura", id: data.faturaId, status },
+	});
+	await enfileirarEventoWebhook(deps, {
+		faturaId: data.faturaId,
+		tipo: "fatura.status",
+		alvo: { faturaId: data.faturaId },
+		estado: status,
 	});
 	await releaseLease(db, data.faturaId);
 	log.info({ faturaId: data.faturaId, status }, "fatura consolidada");

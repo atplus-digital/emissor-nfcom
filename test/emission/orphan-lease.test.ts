@@ -20,7 +20,7 @@ describe("SPEC-0001 caso 2 — orphan lease reassume", () => {
 			],
 		};
 		const atacado = {
-			buscarFaturaPorChave: mock(() => Promise.resolve(fatura)),
+			getFaturaPorId: mock(() => Promise.resolve(fatura)),
 		} as unknown as AtacadoPort;
 		const enqueued: string[] = [];
 		const res = await handleEmitFatura(
@@ -39,7 +39,7 @@ describe("SPEC-0001 caso 2 — orphan lease reassume", () => {
 		const db = await mkDb();
 		const { acquireLease } = await import("#/lib/db/lease");
 		await acquireLease(db, 501); // lease já detido
-		const atacado = { buscarFaturaPorChave: mock(() => Promise.resolve(null)) } as unknown as AtacadoPort;
+		const atacado = { getFaturaPorId: mock(() => Promise.resolve(null)) } as unknown as AtacadoPort;
 		const enqueued: string[] = [];
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 501, parceiroId: 1, dataReferencia: "2026-08-01" }, attemptsMade: 0, opts: {} } as any,
@@ -62,7 +62,7 @@ describe("SPEC-0001 caso 2 — orphan lease reassume", () => {
 				{ id: 511, faturaId: 510, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10", notas: [] },
 			],
 		};
-		const atacado = { buscarFaturaPorChave: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort;
+		const atacado = { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort;
 		const enqueued: string[] = [];
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 510, parceiroId: 1, dataReferencia: "2026-08-01" }, attemptsMade: 0, opts: {} } as any,

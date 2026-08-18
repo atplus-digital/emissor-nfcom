@@ -13,6 +13,27 @@
  */
 import type { StatusFatura } from "#/domain/types";
 
+/**
+ * Fuso horário do domínio (CONVENTIONS.md m7): datas puras de domínio são
+ * computadas em `America/Sao_Paulo`, nunca no fuso do container (UTC em
+ * produção).
+ */
+export const FUSO_SP = "America/Sao_Paulo";
+
+/**
+ * Data pura de hoje (`YYYY-MM-DD`) no fuso do domínio (America/Sao_Paulo).
+ * Usa `en-CA` (formato ISO YYYY-MM-DD) para evitar a máscara DD/MM/AAAA de
+ * `pt-BR` e a dependência do fuso UTC do container (M9).
+ */
+export function hojeEmSP(): string {
+	return new Intl.DateTimeFormat("en-CA", {
+		timeZone: FUSO_SP,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).format(new Date());
+}
+
 export interface ResultadoCobranca {
 	cobrancaId: number;
 	boletoOk: boolean;
@@ -32,7 +53,10 @@ export function consolidarFatura(
 	resultados: ResultadoCobranca[],
 ): ResultadoConsolidacao {
 	if (resultados.length === 0) {
-		return { status: "emitida" };
+		// Edge teórico (m3): 0 cobranças = nada emitido ainda → `a-emitir`, não
+		// `emitida` (nada foi emitido de fato). O caminho normal de 0 children é
+		// tratado no worker (M3) sem passar por aqui.
+		return { status: "a-emitir" };
 	}
 	// Uma cobrança é "totalmente ok" se boleto ok E todas as notas ok.
 	const totalOk = (r: ResultadoCobranca) =>

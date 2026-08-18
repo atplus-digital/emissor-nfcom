@@ -56,8 +56,8 @@ describe("consolidarFatura (SPEC-0001)", () => {
 		expect(status).toBe("parcial");
 	});
 
-	it("lista vazia → emitida (nada a falhar)", () => {
+	it("lista vazia → a-emitir (m3: nada foi emitido)", () => {
 		const { status } = consolidarFatura([]);
-		expect(status).toBe("emitida");
+		expect(status).toBe("a-emitir");
 	});
 });
