@@ -1,5 +1,5 @@
 {
-	"name": "emissor-nfcom-viewer",
+	"name": "@emissor/viewer",
 	"private": true,
 	"type": "module",
 	"scripts": {
