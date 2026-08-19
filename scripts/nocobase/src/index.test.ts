@@ -38,6 +38,11 @@ import { writeCliError } from "@generators/lib/cli/cli-output";
 import { runOrchestrator } from "@generators/lib/pipeline/orchestrator";
 import { env } from "@shared/utils/env";
 import { handleMainFailure, runGenerators } from "./index";
+import { isDiffDebug, setDiffDebug } from "./lib/validation/diff-debug-options";
+import {
+	isValidationSkipped,
+	setValidationSkipped,
+} from "./lib/validation/validation-options";
 
 describe("generators index main()", () => {
 	const originalArgv = process.argv;
@@ -45,9 +50,14 @@ describe("generators index main()", () => {
 	beforeEach(() => {
 		runOrchestrator.mockClear();
 		writeCliError.mockClear();
+		// Zera o estado de módulo das flags adicionais para não vazar entre testes
+		setValidationSkipped(false);
+		setDiffDebug(false);
 	});
 
 	afterEach(() => {
+		setValidationSkipped(false);
+		setDiffDebug(false);
 		vi.restoreAllMocks();
 		// bun: vi.spyOn não suporta accessor (process.argv) — restaura via defineProperty
 		Object.defineProperty(process, "argv", {
@@ -115,6 +125,32 @@ describe("generators index main()", () => {
 		expect(runOrchestrator).toHaveBeenCalledWith(expect.any(Array), {
 			concurrent: true,
 		});
+	});
+
+	it("ativa skip de validação quando --skip-validate é passado", async () => {
+		stubArgv([
+			"node",
+			"scripts/generators/src/index.ts",
+			"--types",
+			"--skip-validate",
+		]);
+
+		await runGenerators();
+
+		expect(isValidationSkipped()).toBe(true);
+	});
+
+	it("ativa diff-debug quando --diff-debug é passado", async () => {
+		stubArgv([
+			"node",
+			"scripts/generators/src/index.ts",
+			"--types",
+			"--diff-debug",
+		]);
+
+		await runGenerators();
+
+		expect(isDiffDebug()).toBe(true);
 	});
 });
 

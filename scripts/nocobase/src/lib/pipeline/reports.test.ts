@@ -363,6 +363,54 @@ describe("TC-UT-RPT-006: renderReportsMarkdown groups generate-types collections
 		expect(zebraIndex).toBeGreaterThan(alphaIndex);
 	});
 
+	it("should sort multiple namespaces alphabetically in the summary", () => {
+		const context = createReportsContext();
+
+		addJsonReport(context, {
+			namespace: "zzz-namespace",
+			key: "r1",
+			title: "R1",
+			payload: {},
+			scope: { pipeline: "p", stage: "s" },
+		});
+
+		addJsonReport(context, {
+			namespace: "aaa-namespace",
+			key: "r2",
+			title: "R2",
+			payload: {},
+			scope: { pipeline: "p", stage: "s" },
+		});
+
+		const markdown = renderReportsMarkdown(context);
+		const aaaIndex = markdown.indexOf("aaa-namespace");
+		const zzzIndex = markdown.indexOf("zzz-namespace");
+
+		expect(aaaIndex).toBeGreaterThan(-1);
+		expect(zzzIndex).toBeGreaterThan(aaaIndex);
+	});
+
+	it("should render dataSourceKey for generate-types entries without collectionName", () => {
+		const context = createReportsContext();
+
+		addJsonReport(context, {
+			namespace: "generate-types",
+			key: "summary",
+			title: "Pipeline Summary",
+			payload: { totalCollections: 2 },
+			scope: {
+				pipeline: "generate-types",
+				stage: "summary",
+				dataSourceKey: "nocobase",
+			},
+		});
+
+		const markdown = renderReportsMarkdown(context);
+
+		expect(markdown).toContain("### Pipeline Summary");
+		expect(markdown).toContain("datasource: `nocobase`");
+	});
+
 	it("should render non-generate-types namespaces with flat entry list", () => {
 		const context = createReportsContext();
 

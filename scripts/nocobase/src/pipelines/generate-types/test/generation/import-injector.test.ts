@@ -384,6 +384,25 @@ describe("import-injector", () => {
 			);
 		});
 
+		it("sorts multiple type names alphabetically within the same source", () => {
+			const content = "/**\n * generated\n */\n\nexport interface UsersBase { id: number; }";
+
+			const withImports = injectTypeImports(
+				content,
+				new Map([
+					["./shared", new Set(["ZebraBase", "AlphaBase", "MangoBase"])],
+				]),
+			);
+
+			const zebraIndex = withImports.indexOf("ZebraBase");
+			const alphaIndex = withImports.indexOf("AlphaBase");
+			const mangoIndex = withImports.indexOf("MangoBase");
+
+			expect(alphaIndex).toBeGreaterThan(-1);
+			expect(mangoIndex).toBeGreaterThan(alphaIndex);
+			expect(zebraIndex).toBeGreaterThan(mangoIndex);
+		});
+
 		it("returns content unchanged when injectTypeImports receives empty map", () => {
 			const content = "export interface UsersBase { id: number; }";
 

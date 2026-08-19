@@ -60,6 +60,7 @@ import {
 } from "@generators/lib/pipeline/reports";
 import { listTypeScriptFilesInDirectory } from "@generators/lib/validation/tsc-validator";
 import { isValidationSkipped } from "@generators/lib/validation/validation-options";
+import { setDiffDebug } from "@generators/lib/validation/diff-debug-options";
 import type { TaskRunner } from "@shared/types";
 
 // Working directory for tests
@@ -129,6 +130,7 @@ describe("lifecycle-tasks", () => {
 
 	afterEach(() => {
 		fs.rmSync("/tmp/test-lifecycle-tasks", { recursive: true, force: true });
+		setDiffDebug(false);
 		vi.restoreAllMocks();
 		globalThis.process = originalProcess;
 	});
@@ -692,5 +694,89 @@ describe("lifecycle-tasks", () => {
 		// Assert
 		expect(typeof mockTask.output).toBe("string");
 		expect(mockTask.output).toMatch(/\d+ alterado\(s\)/);
+	});
+
+	it("TC-UT-LIFT-020: should build a null plan when hasChanges but diffs is missing", async () => {
+		// Garante que a validação NÃO está pulada (mock pode ter sido setado true antes)
+		isValidationSkipped.mockReturnValue(false);
+		// ctx.hasChanges=true e ctx.diffs indefinido → collectValidationPlan retorna null
+		const ctx: LifecycleCtx = {
+			hasChanges: true,
+		};
+
+		await validateGeneratedOutput(ctx, baseParams);
+
+		expect(runValidation).not.toHaveBeenCalled();
+	});
+
+	it("TC-UT-LIFT-021: should build a lint-only plan when only non-TS files change", async () => {
+		// Garante que a validação NÃO está pulada (mock pode ter sido setado true antes)
+		isValidationSkipped.mockReturnValue(false);
+		const tempGenerated = path.join(
+			WORKSPACE_ROOT,
+			".temp",
+			"123-abc",
+			"src/generated",
+		);
+		fs.mkdirSync(tempGenerated, { recursive: true });
+		fs.writeFileSync(path.join(tempGenerated, "a.txt"), "not a ts file\n");
+
+		const ctx: LifecycleCtx = {
+			hasChanges: true,
+			diffs: [
+				{
+					changedFiles: ["a.txt"],
+					unchangedFiles: [],
+					deletedFiles: [],
+				},
+			],
+		};
+
+		await validateGeneratedOutput(ctx, baseParams);
+
+		// Nenhum arquivo .ts, mas diretório temp existe → plan apenas com lintDirs
+		expect(runValidation).toHaveBeenCalledWith({
+			files: [],
+			lintDirs: [tempGenerated],
+		});
+	});
+
+	it("TC-UT-LIFT-022: should write diff-debug report when diff-debug is enabled", async () => {
+		// Habilita o modo de diagnóstico real (módulo não mockado)
+		setDiffDebug(true);
+
+		const tempGenerated = path.join(
+			WORKSPACE_ROOT,
+			".temp",
+			"123-abc",
+			"src/generated",
+		);
+		fs.mkdirSync(tempGenerated, { recursive: true });
+		fs.writeFileSync(path.join(tempGenerated, "a.ts"), "export const a = 1;\n");
+
+		const ctx = { hasChanges: false, diffs: [] as unknown[] };
+		computeDiff.mockReturnValue({
+			changedFiles: ["a.ts"],
+			unchangedFiles: [],
+			deletedFiles: [],
+		});
+
+		await diffTempVsOutput(
+			ctx as Parameters<typeof diffTempVsOutput>[0],
+			baseParams,
+		);
+
+		// O bloco de diff-debug escreve o relatório em .reports/generate-types
+		expect(ctx.hasChanges).toBe(true);
+		expect(
+			fs.existsSync(
+				path.join(
+					WORKSPACE_ROOT,
+					".reports",
+					"generate-types",
+					"diff-debug.txt",
+				),
+			),
+		).toBe(true);
 	});
 });
