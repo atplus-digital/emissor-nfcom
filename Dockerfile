@@ -7,10 +7,22 @@ WORKDIR /app
 
 # Cache de dependências (só re-instala quando package.json/bun.lock mudam)
 COPY package.json bun.lock ./
+# O bunfig define `linker = "hoisted"` — sem ele o `bun install` na imagem usa
+# `isolated` (default em workspaces) e o bundle não resolve o pacote nativo
+# `@libsql/linux-x64-gnu` a partir de dist/ (ADR-0011)
+COPY bunfig.toml ./
+# Manifests dos workspaces (o lockfile os referencia — sem eles o
+# --frozen-lockfile falha; ADR-0011)
+COPY apps/backend/package.json apps/backend/
+COPY apps/viewer/package.json apps/viewer/
+COPY packages/db/package.json packages/db/
+COPY packages/generated/package.json packages/generated/
 RUN bun install --frozen-lockfile
 
 # Build do bundle
-COPY src ./src
+COPY apps/backend/src ./apps/backend/src
+COPY packages/db/src ./packages/db/src
+COPY packages/generated/types ./packages/generated/types
 COPY tsconfig.json ./
 # Migrations Drizzle (ADR-0003): o runtime copia deste stage para aplicar no boot
 # (`bunx drizzle-kit migrate` no CMD). Sem isso, o COPY do runtime falha.
@@ -33,6 +45,9 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/drizzle.config.ts ./drizzle.config.ts
+# Schema do @emissor/db (drizzle.config.ts aponta para packages/db/src/schema.ts —
+# `bunx drizzle-kit migrate` no boot precisa lê-lo; ADR-0011)
+COPY --from=build /app/packages/db ./packages/db
 
 # SQLite de coordenação em volume persistente (idempotency keys, outbox, lease)
 # — perder esse arquivo = perder a garantia anti-duplicação (ADR-0003).

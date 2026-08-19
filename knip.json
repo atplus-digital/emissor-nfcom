@@ -2,5 +2,6 @@
 	"$schema": "https://unpkg.com/knip@6/schema.json",
 	"includeEntryExports": true,
 	"ignoreFiles": [".agents/skills/nocobase-docs/scripts/nocobase-client.ts"],
-	"ignoreDependencies": ["prettier-plugin-sh"]
+	"ignore": ["packages/generated/**"],
+	"ignoreDependencies": ["prettier-plugin-sh", "@libsql/client"]
 }

@@ -28,18 +28,20 @@ envelope canônico, serializado por Hono (ADR-0005):
 - O endpoint de webhook de saída é autenticado por um `X-Webhook-Signature` (HMAC do
   corpo com segredo `WEBHOOK_SECRET`) para que o cliente verifique a origem.
   `WEBHOOK_SECRET` é **obrigatório quando `WEBHOOK_URL` está configurada** (validado em
-  `src/env.ts`); com `WEBHOOK_URL` vazia, o push é desativado (SPEC-0001 caso 14) e o
+  `apps/backend/src/env.ts`); com `WEBHOOK_URL` vazia, o push é desativado (SPEC-0001 caso 14) e o
   segredo é opcional.
 - As credenciais dos provedores externos (Asaas, NFCom, Atacado) vivem só em env e
   nunca saem nas respostas/logs (redação pino, ADR-0005).
 
 ## Variáveis de ambiente
 
-- Toda variável de ambiente usada pelo app é declarada e validada em `src/env.ts`
-  via `@t3-oss/env-core` + Zod (ADR-0005) — `process.env` direto fora de
-  `src/env.ts` é proibido no app (exceção: scripts de tooling fora do app).
+- Toda variável de ambiente usada pelo app é declarada e validada em
+  `apps/backend/src/env.ts` via `@t3-oss/env-core` + Zod (ADR-0005) —
+  `process.env` direto fora do env é proibido no app (exceções: scripts de
+  tooling fora do app; `packages/db` lê apenas `DATABASE_URL` com o mesmo
+  default do zod — pacote de workspace não alcança o env do backend, ADR-0011).
 - Env nova (novo provedor, feature flag, default fiscal) entra primeiro no schema
-  de `src/env.ts`, com validação/default lá — nunca no call site.
+  de `apps/backend/src/env.ts`, com validação/default lá — nunca no call site.
 
 ## Datas e fuso horário
 
@@ -53,7 +55,7 @@ envelope canônico, serializado por Hono (ADR-0005):
 ## Migrations Drizzle (ADR-0009)
 
 Migrations são **sempre geradas** via `bunx drizzle-kit generate` a partir de
-`src/lib/db/schema.ts` — nunca escritas/editadas à mão (ADR-0009). A regra abaixo é
+`packages/db/src/schema.ts` — nunca escritas/editadas à mão (ADR-0009). A regra abaixo é
 **processo de PR**, não auto-validável por inspeção de arquivo.
 
 - **Nomear AO GERAR**: o drizzle-kit atribui um nome aleatório (ex.: `0000_nervous_dexter_bennett`).
@@ -67,7 +69,7 @@ Migrations são **sempre geradas** via `bunx drizzle-kit generate` a partir de
   `bunx drizzle-kit generate` ("No schema changes") e `bunx drizzle-kit migrate` (aplica
   limpo num DB temporário).
 - **Nunca editar SQL gerado**: o conteúdo de `drizzle/*.sql` é saída de máquina. Se o SQL
-  estiver errado, corrija `src/lib/db/schema.ts` e regenere. Após aplicada em produção,
+  estiver errado, corrija `packages/db/src/schema.ts` e regenere. Após aplicada em produção,
   uma migration **nunca** é editada — gera-se uma corretiva.
 - **Revisão no PR**: o SQL gerado é revisado no PR (validação, não reescrita).
 

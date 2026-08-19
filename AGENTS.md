@@ -27,9 +27,10 @@ com idempotência/outbox (SQLite). Stack: Bun + Hono + Drizzle + Zod 4. Interno 
   dependências externas (Redis gerenciado ou container irmão).
 - **Nunca** escalar para N réplicas: SQLite de coordenação não é compartilhável
   (ADR-0002/0003). Escalar = ADR futuro de migração para Postgres.
-- Env validada por Zod em `src/env.ts` (`@t3-oss/env-core`, ADR-0005) — nunca
-  `process.env` direto (exceção: scripts de tooling fora do app).
-- Migrations Drizzle: `bunx drizzle-kit generate` ao mudar `src/lib/db/schema.ts`; o SQL
+- Env validada por Zod em `apps/backend/src/env.ts` (`@t3-oss/env-core`, ADR-0005) —
+  nunca `process.env` direto (exceções: scripts de tooling fora do app;
+  `packages/db` lê só `DATABASE_URL`, ADR-0011).
+- Migrations Drizzle: `bunx drizzle-kit generate` ao mudar `packages/db/src/schema.ts`; o SQL
   gerado é **revisado no PR**; `bunx drizzle-kit migrate` roda no boot do pod
   (idempotente).
 
@@ -90,7 +91,7 @@ bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
 
 - `scripts/docs-check` é **Python** (`#!/usr/bin/env python3`), não bun — rodar
   `./scripts/docs-check` direto, não `bun scripts/docs-check`.
-- `src/generated/` é output do gerador (`bun run generate:types`) — **nunca** editar
+- `packages/generated/` é output do gerador (`bun run generate:types`) — **nunca** editar
   à mão (ADR-0006); ajustes vivem em `scripts/nocobase/src/pipelines/generate-types/`.
 - Monetário no domínio é **centavos inteiros**; o CRM entrega `number` em unidade real
   — conversão só no translator do módulo `atacado` (ADR-0004).

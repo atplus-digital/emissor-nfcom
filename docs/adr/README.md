@@ -14,3 +14,4 @@
 | [ADR-0008](0008-logging-estruturado-pino.md) | Logging estruturado com pino: correlação por AsyncLocalStorage e redação explícita | accepted |
 | [ADR-0009](0009-migrations-drizzle-geradas-sem-edicao-manual.md) | Migrations de BD são geradas pelo drizzle-kit, nunca escritas à mão | accepted |
 | [ADR-0010](0010-supersede-0006-tipos-translators-hand-written.md) | Regra do ADR-0006 supersedida para tipos de translators: shapes hand-written são exceção documentada | accepted |
+| [ADR-0011](0011-monorepo-bun-workspaces.md) | Monorepo Bun Workspaces: apps/backend, apps/viewer, packages/db, packages/generated | accepted |

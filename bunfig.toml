@@ -1,3 +1,10 @@
+[install]
+# Linker `hoisted` (npm-like, flat) mesmo com workspaces — o Bun 1.3 usa
+# `isolated` por default em workspaces, o que esconde pacotes transientes do
+# `node_modules` raiz e quebra o bundle autocontido (ex.: o pacote nativo
+# `@libsql/linux-x64-gnu` deixa de resolver a partir de `dist/`, ADR-0011).
+linker = "hoisted"
+
 [test]
 # GATE DE COBERTURA (DoD global — AGENTS.md §"Gate de cobertura").
 #
@@ -15,13 +22,13 @@
 coverageThreshold = { lines = 0.95, functions = 0.95 }
 
 # Arquivos fora do denominador de cobertura (e do gate):
-#   - src/generated/**       → output do gerador (ADR-0006), nunca testado à mão.
+#   - packages/generated/**       → output do gerador (ADR-0006), nunca testado à mão.
 #   - scripts/nocobase/src/utils/env.ts → limitação de instrumentação do Bun: os
 #     branches de env válida/inválida são mutuamente exclusivos num processo e o
 #     load inválido apaga a cobertura do corpo do módulo (isolado em 4 configs).
 #     O arquivo tem 16 testes passando que cobrem o comportamento; só a métrica
 #     não alcança 95% de funções. Excluído do gate, não do teste.
 coveragePathIgnorePatterns = [
-	"src/generated/**",
+	"packages/generated/**",
 	"scripts/nocobase/src/utils/env.ts",
 ]

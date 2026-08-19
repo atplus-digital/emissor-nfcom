@@ -62,7 +62,7 @@ services:
     # rodar o app sem root. O `bun --watch` enxerga só o source (bind mount) —
     # o DB vive no volume nomeado, isolado do watch (sem loop de reload).
     user: "0:0"
-    command: sh -c "mkdir -p /app/data && chown -R 1000:1000 /app/data && su bun -c 'cd /app && bunx drizzle-kit migrate && bun --watch src/index.ts'"
+    command: sh -c "mkdir -p /app/data && chown -R 1000:1000 /app/data && su bun -c 'cd /app && bunx drizzle-kit migrate && bun --watch apps/backend/src/index.ts'"
     # Healthcheck no /health (rota pública de liveness, ADR-0002) — o serviço
     # `tunnel` depende dele p/ só abrir o preview após o app responder.
     healthcheck:

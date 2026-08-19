@@ -15,6 +15,14 @@ WORKDIR /app
 # O node_modules fica na camada da imagem; o compose preserva-o via volume
 # anônimo (/app/node_modules) para o bind mount de ./:/app não o sobrescrever.
 COPY package.json bun.lock ./
+# O bunfig define `linker = "hoisted"` (resolução do bundle, ADR-0011)
+COPY bunfig.toml ./
+# Manifests dos workspaces (o lockfile os referencia — sem eles o
+# --frozen-lockfile falha; ADR-0011). O source vem do bind mount do compose.
+COPY apps/backend/package.json apps/backend/
+COPY apps/viewer/package.json apps/viewer/
+COPY packages/db/package.json packages/db/
+COPY packages/generated/package.json packages/generated/
 RUN bun install --frozen-lockfile
 
 # Usuário não-root (UID 1000 — mesmo UID do `ubuntu` no host, então o bind mount

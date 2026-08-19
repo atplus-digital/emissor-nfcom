@@ -127,6 +127,20 @@
     "implemented-by": []
   },
   {
+    "id": "ADR-0011",
+    "path": "docs/adr/0011-monorepo-bun-workspaces.md",
+    "layer": "adr",
+    "title": "Monorepo Bun Workspaces: apps/backend, apps/viewer, packages/db, packages/generated",
+    "status": "accepted",
+    "builds-on": [
+      "ADR-0007",
+      "ADR-0005",
+      "ADR-0006"
+    ],
+    "superseded-by": null,
+    "implemented-by": []
+  },
+  {
     "id": "SPEC-0001",
     "path": "docs/specs/0001-fluxo-de-emissao-de-fatura.md",
     "layer": "specs",

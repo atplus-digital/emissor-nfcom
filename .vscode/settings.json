@@ -4,7 +4,7 @@
 	"files.readonlyInclude": {
 		".husky/**": true,
 		"node_modules/**": true,
-		"src/generated/**": true,
+		"packages/generated/**": true,
 		"dist": true
 	},
 	"tailwindCSS.lint.suggestCanonicalClasses": "warning",

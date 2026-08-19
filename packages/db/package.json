@@ -1,0 +1,17 @@
+{
+	"name": "@emissor/db",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/client.ts",
+		"./client": "./src/client.ts",
+		"./schema": "./src/schema.ts",
+		"./idempotency": "./src/idempotency.ts",
+		"./lease": "./src/lease.ts",
+		"./outbox": "./src/outbox.ts"
+	},
+	"dependencies": {
+		"@libsql/client": "^0.17.4",
+		"drizzle-orm": "^0.45.2"
+	}
+}

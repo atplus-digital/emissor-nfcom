@@ -27,9 +27,13 @@
 		"noUnusedParameters": false,
 		"noPropertyAccessFromIndexSignature": false,
 
-		// Path aliases do gerador de types (scripts/nocobase)
+		// Path aliases (monorepo, ADR-0011): `#/` aponta para o src do backend;
+		// `@emissor/db/*` para o pacote de workspace (a resolução primária é o
+		// symlink de workspace + exports do package.json — o alias é robustez
+		// para typecheck). Restantes: gerador de types (scripts/nocobase).
 		"paths": {
-			"#/*": ["./src/*"],
+			"#/*": ["./apps/backend/src/*"],
+			"@emissor/db/*": ["./packages/db/src/*"],
 			"@generators/*": ["./scripts/nocobase/src/*"],
 			"@shared/types": ["./scripts/nocobase/types.ts"],
 			"@shared/*": ["./scripts/nocobase/src/*"]
@@ -40,9 +44,9 @@
 		// Testes rodam via bun test (transpilação), não são typecheckados
 		"**/*.test.ts",
 		"**/*.spec.ts",
-		// Frontend de visualização (viewer/) tem tsconfig próprio (lib DOM) e
-		// valida isolado (`bunx tsc --noEmit` em viewer/). Excluído do typecheck
-		// da raiz — não faz parte do bundle do emissor (frontend separado).
-		"viewer"
+		// Frontend de visualização (apps/viewer) tem tsconfig próprio (lib DOM) e
+		// valida isolado (`bunx tsc --noEmit` em apps/viewer). Excluído do
+		// typecheck da raiz — não faz parte do bundle do emissor (frontend separado).
+		"apps/viewer"
 	]
 }
