@@ -488,7 +488,7 @@ export async function handleEmitCobranca(
 		const enqueue = deps.enqueueFilho ?? (async () => {});
 		let notasEnfileiradas = 0;
 		for (const n of d.notas) {
-			await enqueue("emit-nfcom", toNfcomData(n, d.cobrancaId));
+			await enqueue("emit-nfcom", toNfcomData(n, d.cobrancaId, d.faturaId));
 			notasEnfileiradas++;
 		}
 		return { boletoOk, notasEnfileiradas, erro: erroMsg };
@@ -570,11 +570,11 @@ async function commitCobranca(
 	});
 }
 
-function toNfcomData(n: ResumoNota, cobrancaId: number): EmitNfcomData {
+function toNfcomData(n: ResumoNota, cobrancaId: number, faturaId: number): EmitNfcomData {
 	return {
 		notaId: n.notaId,
 		cobrancaId,
-		faturaId: 0, // preenchido pelo wiring ao enfileirar (parent sabe); em teste não importa
+		faturaId,
 		destinatario: {
 			nome: n.nome,
 			cpfcnpj: n.cpfcnpj,

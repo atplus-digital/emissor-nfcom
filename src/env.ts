@@ -39,7 +39,7 @@ const _env = createEnv({
 		RATE_LIMIT_ATACADO: z.coerce.number().positive().default(10),
 		
 		// Defaults fiscais (SPEC-0002; revisar com contador)
-		FISCAL_CFOP_DEFAULT: z.string().default("6102"),
+		FISCAL_CFOP_DEFAULT: z.string().default("6307"),
 		FISCAL_CCLASS_DEFAULT: z.string().min(1),
 		FISCAL_ICMS_ALIQUOTA: z.coerce.number().min(0).max(1).default(0),
 
