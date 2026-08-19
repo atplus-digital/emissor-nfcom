@@ -66,7 +66,6 @@ src/
 │   └── ports/               # interfaces que modules implementam (ADR-0004)
 ├── modules/                 # uma ACL por integração (ADR-0004)
 │   ├── atacado/
-│   │   ├── atacado.port.ts
 │   │   ├── atacado.repository.ts
 │   │   └── translators/
 │   ├── asaas/
