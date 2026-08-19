@@ -73,6 +73,7 @@ export function fakeAtacado(over: Partial<AtacadoPort> = {}): AtacadoPort {
 		buscarFaturaPorChave: async () => null,
 		getFaturaPorId: async () => null,
 		buscarErrosPorFatura: async () => [],
+		listarFaturas: async () => [],
 		criarFatura: async () => ({ id: 101 }),
 		criarCobranca: async () => ({ id: 456 }),
 		criarNota: async () => ({ id: 7 }),

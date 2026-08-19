@@ -144,6 +144,52 @@ describe("montarPayloadEmitir", () => {
 		expect(primeiroItem.bc_icms).toBe(300.0);
 	});
 
+	describe("rgie — normalização de IE na fronteira (Defeito B)", () => {
+		it("rgie numérica → preservada como está", () => {
+			const payload = montarPayloadEmitir({
+				...input,
+				destinatario: { ...input.destinatario, rgie: "123" },
+			});
+			expect(payload.rgie).toBe("123");
+		});
+
+		it("rgie='ISENTO' e sem env → campo omitido (undefined)", () => {
+			const payload = montarPayloadEmitir({
+				...input,
+				destinatario: { ...input.destinatario, rgie: "ISENTO" },
+			});
+			expect(payload.rgie).toBeUndefined();
+			expect("rgie" in payload).toBe(true); // chave presente, valor undefined → JSON omite
+		});
+
+		it("rgie='ISENTO' e ieIsento configurado → usa o fallback da env", () => {
+			const payload = montarPayloadEmitir(
+				{ ...input, destinatario: { ...input.destinatario, rgie: "ISENTO" } },
+				{ ieIsento: "000000000000" },
+			);
+			expect(payload.rgie).toBe("000000000000");
+		});
+
+		it("rgie ausente e ieIsento configurado → usa o fallback", () => {
+			const payload = montarPayloadEmitir(input, { ieIsento: "999" });
+			expect(payload.rgie).toBe("999");
+		});
+
+		it("rgie numérica prevalece sobre ieIsento (fallback só p/ isento)", () => {
+			const payload = montarPayloadEmitir(
+				{ ...input, destinatario: { ...input.destinatario, rgie: "123" } },
+				{ ieIsento: "999" },
+			);
+			expect(payload.rgie).toBe("123");
+		});
+
+		it("rgie vazia/whitespace e sem env → omitida", () => {
+			expect(
+				montarPayloadEmitir({ ...input, destinatario: { ...input.destinatario, rgie: "  " } }).rgie,
+			).toBeUndefined();
+		});
+	});
+
 	it("mascara CNPJ (14 dígitos) — regressão do bug do gateway NFCom", () => {
 		// O gateway NFCom (Vigo) roteia o elemento XML CPF vs CNPJ pela
 		// presença dos caracteres de formatação, NÃO pelo comprimento. Um

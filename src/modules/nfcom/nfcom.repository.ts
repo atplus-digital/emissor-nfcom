@@ -39,6 +39,13 @@ export interface CriarNfcomRepositoryOptions {
 	ttlMs?: number;
 	/** Relógio injetável p/ teste (default Date.now). */
 	now?: () => number;
+	/**
+	 * Fallback de IE p/ destinatário isento (`env.FISCAL_IE_ISENTO`, ligado pelo
+	 * composition root — Defeito B). Injetado, não lido aqui, para não disparar a
+	 * validação de env em testes (mesma convenção de `credenciais`). Opcional:
+	 * ausente/vazia → `undefined` (campo `rgie` vai omitido no payload).
+	 */
+	ieIsento?: string;
 }
 
 function is401(err: unknown): err is NfcomApiError {
@@ -77,7 +84,7 @@ export function criarNfcomRepository(
 
 	async function emitirComRetry(input: EmitirNFComInput): Promise<EmitirNFComResultado> {
 		const token = await obterToken();
-		const payload = montarPayloadEmitir(input);
+		const payload = montarPayloadEmitir(input, { ieIsento: opts.ieIsento });
 		try {
 			const resposta = await client.emitir(token, payload);
 			return traduzirResultadoEmitir(resposta);

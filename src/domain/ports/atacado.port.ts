@@ -24,6 +24,7 @@ import type {
 	StatusFatura,
 	StatusInternoNota,
 	SituacaoNota,
+	TipoFaturamento,
 } from "#/domain/types";
 
 /** Input de criação de fatura (campos de domínio; o módulo traduz p/ `f_*`). */
@@ -98,6 +99,34 @@ export interface RegistrarErroInput {
 	statusCode?: string;
 }
 
+/**
+ * Filtro da listagem de faturas do painel (leitura da fonte de domínio).
+ * Todos os campos são opcionais — a lista só filtra pelos campos presentes.
+ */
+export interface FiltroFaturas {
+	parceiroId?: number;
+	/** Mês de referência (`YYYY-MM-DD`). */
+	dataReferencia?: string;
+	status?: StatusFatura;
+}
+
+/**
+ * Resumo de fatura p/ listagem do painel — sem a árvore (cobranças/notas/itens
+ * ficam para o detalhe, `getFaturaPorId`). Monetário em centavos (ADR-0004).
+ */
+export interface FaturaResumo {
+	id: number;
+	parceiroId: number;
+	dataReferencia: string;
+	dataVencimento: string;
+	/** Total da fatura, em centavos. */
+	valorTotal: number;
+	tipoFaturamento: TipoFaturamento;
+	status: StatusFatura;
+	/** Quantidade de cobranças da fatura (sem carregar o conteúdo). */
+	cobrancasCount: number;
+}
+
 /** Erro de emissão registrado (`t_nfcom_erros`) — leitura p/ inspeção (SPEC-0001). */
 export interface ErroEmissao {
 	id: number;
@@ -134,6 +163,12 @@ export interface AtacadoPort {
 		cobrancaIds: number[],
 		notaIds: number[],
 	): Promise<ErroEmissao[]>;
+	/**
+	 * Lista resumos de fatura com filtros opcionais (painel). Sem a árvore —
+	 * só as cobranças anexadas p/ contar (`cobrancasCount`). `[]` quando o
+	 * Atacado responde 404 (nenhum registro com o filtro).
+	 */
+	listarFaturas(filtro: FiltroFaturas): Promise<FaturaResumo[]>;
 
 	// Criação da árvore (direta, com rollback manual — SPEC-0002)
 	criarFatura(input: CriarFaturaInput): Promise<{ id: number }>;

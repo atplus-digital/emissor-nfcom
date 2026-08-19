@@ -4,6 +4,7 @@ import { criarApp } from "#/http/server";
 import { requestLogMiddleware } from "#/http/middlewares/request-log";
 import { errorHandler } from "#/http/middlewares/error-handler";
 import type { AtacadoPort, QueuePort } from "#/domain/ports";
+import type { AuthNocoBaseClient } from "#/modules/atacado/translators/auth";
 
 const fakeAtacado = {} as AtacadoPort;
 const fakeQueue = {
@@ -53,6 +54,43 @@ describe("criarApp (composition)", () => {
 		expect(res.status).toBe(422);
 		const body = await res.json();
 		expect(body.erro.tipo).toBe("VALIDACAO");
+	});
+
+	it("monta /painel quando painelCookieSecret + authNocoBase estão presentes", async () => {
+		const authNocoBase = {
+			signIn: mock(async () => ({ token: "t", userId: 1, nickname: "bob" })),
+			check: mock(async () => true),
+		} as unknown as AuthNocoBaseClient;
+		const app = criarApp({
+			atacado: fakeAtacado,
+			queue: fakeQueue,
+			apiKey: "secret",
+			painelCookieSecret: "painel-secret",
+			authNocoBase,
+		});
+		// Sessão inválida (sem cookie) → 401 NAO_AUTORIZADO — prova que o /painel
+		// sub-app foi montado (sem os deps, a rota cairia em 404).
+		const res = await app.request("/painel/api/session");
+		expect(res.status).toBe(401);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("NAO_AUTORIZADO");
+		// login com credenciais válidas emite a sessão e o cookie painel_sess.
+		const login = await app.request("/painel/api/login", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ account: "bob@x.com", password: "senha" }),
+		});
+		expect(login.status).toBe(200);
+		expect(login.headers.get("set-cookie")).toContain("painel_sess");
+	});
+
+	it("não monta /painel sem painelCookieSecret (painel opcional)", async () => {
+		const app = criarApp({ atacado: fakeAtacado, queue: fakeQueue, apiKey: "secret" });
+		// Com a API key válida (passa o middleware global) não há rota /painel → 404.
+		const res = await app.request("/painel/api/session", {
+			headers: { "x-api-key": "secret" },
+		});
+		expect(res.status).toBe(404);
 	});
 
 	it("logLevel debug liga o detalhe de ERRO_INTERNO na resposta", async () => {

@@ -23,6 +23,8 @@ import type {
 	CriarItemInput,
 	CriarNotaInput,
 	ErroEmissao,
+	FaturaResumo,
+	FiltroFaturas,
 	RegistrarErroInput,
 } from "#/domain/ports/atacado.port";
 import type { Cliente, Fatura, Parceiro, Plano } from "#/domain/types";
@@ -39,6 +41,7 @@ import { faturaToCreate, faturaToDomain, type FaturaExterna } from "./translator
 import { itemToCreate } from "./translators/item";
 import { notaToCreate } from "./translators/nota";
 import { parceiroToDomain, type ParceiroExterno } from "./translators/parceiro";
+import { realToCents } from "./translators/money";
 
 const COL = {
 	faturas: "t_nfcom_faturas",
@@ -144,6 +147,38 @@ export class AtacadoRepository implements AtacadoPort {
 			return (rows as ErroExterna[]).map(erroToDomain);
 		} catch (err) {
 			// 404 em `list` → sem erros (idem buscarClientesAtivosPorParceiro).
+			if (err instanceof AtacadoError && err.statusCode === 404) return [];
+			throw err;
+		}
+	}
+
+	async listarFaturas(filtro: FiltroFaturas): Promise<FaturaResumo[]> {
+		// Filter com SÓ os campos presentes (NocoBase: campo ausente não filtra).
+		const filter: Record<string, unknown> = {};
+		if (filtro.parceiroId != null) filter.f_fk_parceiro = filtro.parceiroId;
+		if (filtro.dataReferencia != null) filter.f_data_referencia = filtro.dataReferencia;
+		if (filtro.status != null) filter.f_status = filtro.status;
+		try {
+			const rows = await this.client.list(COL.faturas, {
+				filter,
+				appends: ["f_cobrancas"],
+			});
+			// Resumo inline (sem faturaToDomain — a árvore de cobranças não é
+			// traduzida; só o count que o `appends` traz).
+			return (rows as FaturaExterna[]).map((e) => ({
+				id: e.id,
+				parceiroId: e.f_fk_parceiro,
+				dataReferencia: e.f_data_referencia,
+				dataVencimento: e.f_data_vencimento,
+				valorTotal: realToCents(e.f_valor_total),
+				tipoFaturamento: e.f_tipo_de_faturamento,
+				status: e.f_status,
+				cobrancasCount: (e.f_cobrancas ?? []).length,
+			}));
+		} catch (err) {
+			// NocoBase responde 404 em `list` quando não há registro com o
+			// filtro → lista vazia (idem buscarClientesAtivosPorParceiro).
+			// Outros erros (5xx, etc.) propagam.
 			if (err instanceof AtacadoError && err.statusCode === 404) return [];
 			throw err;
 		}

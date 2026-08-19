@@ -39,6 +39,10 @@
 		"node_modules",
 		// Testes rodam via bun test (transpilação), não são typecheckados
 		"**/*.test.ts",
-		"**/*.spec.ts"
+		"**/*.spec.ts",
+		// Frontend de visualização (viewer/) tem tsconfig próprio (lib DOM) e
+		// valida isolado (`bunx tsc --noEmit` em viewer/). Excluído do typecheck
+		// da raiz — não faz parte do bundle do emissor (frontend separado).
+		"viewer"
 	]
 }

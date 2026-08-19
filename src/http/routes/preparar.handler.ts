@@ -18,6 +18,7 @@ import {
 	validarDocumentos,
 	validarEnderecoDestinatario,
 } from "#/domain/fatura/validacao";
+import { normalizarIE } from "#/domain/fiscal/ie";
 import type { DefaultsFiscais } from "#/domain/fatura/defaults-fiscais";
 import { DEFAULTS_FISCAIS_PADRAO } from "#/domain/fatura/defaults-fiscais";
 import type { ErroValidacao, Fatura } from "#/domain/types";
@@ -43,6 +44,15 @@ export interface PrepararInput {
 export interface PrepararDeps {
 	atacado: AtacadoPort;
 	defaultsFiscais?: DefaultsFiscais;
+	/**
+	 * Fallback de IE p/ destinatário isento (`env.FISCAL_IE_ISENTO`, ligado pelo
+	 * composition root). Defeito B: no tipo `parceiro` o destinatário da nota é o
+	 * próprio parceiro — se ele não tem IE numérica (f_ie="ISENTO"/vazio) e não
+	 * há fallback, a emissão falharia no worker com `IE do Destinatário não
+	 * informada`. A validação é antecipada aqui (fail-fast) para não criar
+	 * boletos só para rejeitar na NFCom. O handler não lê env diretamente.
+	 */
+	ieIsento?: string;
 }
 
 /** Resultado: corpo do envelope + status HTTP (1xx-2xx sucesso, 4xx/5xx erro). */
@@ -87,7 +97,7 @@ export async function executarPreparacao(
 	deps: PrepararDeps,
 	input: PrepararInput,
 ): Promise<PrepararResultado> {
-	const { atacado } = deps;
+	const { atacado, ieIsento } = deps;
 	const { parceiroId, dataReferencia, tipoFaturamento } = input;
 	const refNorm = normalizarDataReferencia(dataReferencia);
 
@@ -116,6 +126,16 @@ export async function executarPreparacao(
 	// Caso 1: parceiro não encontrado.
 	if (!parceiro) {
 		return erroResultado(TipoErro.VALIDACAO, "Parceiro não encontrado");
+	}
+	// Defeito B: tipo `parceiro` → o destinatário da nota é o próprio parceiro.
+	// Se ele não tem IE numérica (f_ie="ISENTO"/vazio) e não há fallback
+	// (`FISCAL_IE_ISENTO`), a emissão rejeitaria no worker — falha cedo aqui (422)
+	// sem criar boletos. Tipos com destinatário=cliente (CPF, sem IE) não chegam.
+	if (tipoFaturamento === "parceiro" && normalizarIE(parceiro.ie) === undefined && ieIsento === undefined) {
+		return erroResultado(
+			TipoErro.VALIDACAO,
+			"Parceiro sem IE válida (IE isenta) para faturamento do tipo parceiro — configure FISCAL_IE_ISENTO ou corrija a IE do parceiro",
+		);
 	}
 	// Caso 3: planos inexistentes (antes do filtro de linhas — sem planos, o
 	// filtro descarta todos os clientes e mascararia o erro de planos).

@@ -156,6 +156,28 @@ describe("nfcom.repository — emitirNFCom", () => {
 		expect(client.emitir).toHaveBeenCalledTimes(1);
 	});
 
+	it("Defeito B: rgie='ISENTO' + ieIsento injetado (FISCAL_IE_ISENTO) → fallback no payload", async () => {
+		const { client } = fakeClient();
+		const repo = criarNfcomRepository({ client, credenciais: CRED, ttlMs: 99_999, ieIsento: "000000000000" });
+		await repo.emitirNFCom({
+			...inputEmitir,
+			destinatario: { ...inputEmitir.destinatario, rgie: "ISENTO" },
+		});
+		const payloadArg = (client.emitir.mock.calls[0] as unknown[])[1] as { rgie?: string };
+		expect(payloadArg.rgie).toBe("000000000000");
+	});
+
+	it("Defeito B: rgie='ISENTO' sem ieIsento → campo omitido no payload", async () => {
+		const { client } = fakeClient();
+		const repo = makeRepo(client, { ttlMs: 99_999 });
+		await repo.emitirNFCom({
+			...inputEmitir,
+			destinatario: { ...inputEmitir.destinatario, rgie: "ISENTO" },
+		});
+		const payloadArg = (client.emitir.mock.calls[0] as unknown[])[1] as { rgie?: string };
+		expect(payloadArg.rgie).toBeUndefined();
+	});
+
 	it("não reenvia externalReference no payload", async () => {
 		const { client } = fakeClient();
 		const repo = makeRepo(client, { ttlMs: 99_999 });

@@ -20,6 +20,7 @@ import { QUEUE_NAMES, JOB_NAMES } from "#/lib/queue-names";
 import { createRateLimiter, wrapWithRateLimit } from "#/lib/rate-limit";
 import { criarApp } from "#/http/server";
 import { createAtacadoClient } from "#/modules/atacado/atacado.client";
+import { createAuthNocoBaseClient } from "#/modules/atacado/translators/auth";
 import { AtacadoRepository } from "#/modules/atacado/atacado.repository";
 import { createAsaasClient } from "#/modules/asaas/asaas.client";
 import { AsaasRepository } from "#/modules/asaas/asaas.repository";
@@ -96,6 +97,9 @@ async function main() {
 		};
 
 		// 5. App Hono (rotas + middlewares). Defaults fiscais injetados (ADR-0004).
+		// Painel de visualização (opcional): o `PAINEL_COOKIE_SECRET` ausente
+		// desliga o painel (o server não monta /painel) — não quebra o deploy.
+		const authNocoBase = createAuthNocoBaseClient();
 		const app = criarApp({
 			atacado,
 			queue,
@@ -106,6 +110,12 @@ async function main() {
 				cclass: env.FISCAL_CCLASS_DEFAULT,
 				aliqIcms: env.FISCAL_ICMS_ALIQUOTA,
 			},
+			// Fallback de IE p/ destinatário isento (Defeito B) — opcional na env.
+			ieIsento: env.FISCAL_IE_ISENTO,
+			// Painel de visualização (login NocoBase + cookie assinado).
+			painelCookieSecret: env.PAINEL_COOKIE_SECRET,
+			authNocoBase,
+			nocobaseAuthenticator: env.NOCOBASE_AUTHENTICATOR,
 			// LOG_LEVEL=debug/trace → detalhe de ERRO_INTERNO na resposta (diagnóstico).
 			logLevel: env.LOG_LEVEL,
 		});

@@ -8,6 +8,7 @@
  * e mapeando `pdf`→`pdfUrl`, `xml`→`xmlUrl`.
  */
 import { mascararDoc } from "#/domain/fatura/cpf-cnpj";
+import { normalizarIE } from "#/domain/fiscal/ie";
 import type { Item } from "#/domain/types";
 import type {
 	EmitirNFComInput,
@@ -82,10 +83,33 @@ function centavosParaReais(centavos: number): number {
 	return centavos / 100;
 }
 
-/** Monta o payload `ApiNFComEmitir` (flat) a partir do input de domínio. */
-export function montarPayloadEmitir(input: EmitirNFComInput): ApiNFComEmitir {
+/**
+ * Opções de fronteira do payload (Defeito B). `ieIsento` é o fallback de
+ * `FISCAL_IE_ISENTO` (env opcional, ligada pelo composition root — o tradutor
+ * não lê env, como o domínio não lê env, ADR-0004): usado só quando a IE do
+ * destinatário não é numérica (isenta/ausente).
+ */
+export interface OptsMontarPayloadEmitir {
+	ieIsento?: string;
+}
+
+/**
+ * Monta o payload `ApiNFComEmitir` (flat) a partir do input de domínio.
+ *
+ * `rgie` passa por `normalizarIE` só nesta fronteira (o domínio carrega o
+ * valor cru): o CRM cadastra parceiros isentos com o literal "ISENTO" em
+ * `f_ie`, e o gateway NFCom (Vigo/SEFAZ) trata IE não-numérica como inválida
+ * → rejeição `IE do Destinatário não informada`. Sem IE numérica, o campo é
+ * omitido; se `opts.ieIsento` estiver configurada, ela entra como fallback
+ * (placeholder p/ o caso de o gateway exigir um valor — confirmar com contador).
+ */
+export function montarPayloadEmitir(
+	input: EmitirNFComInput,
+	opts: OptsMontarPayloadEmitir = {},
+): ApiNFComEmitir {
 	const { destinatario, itens } = input;
 	const end = destinatario.endereco;
+	const rgie = normalizarIE(destinatario.rgie) ?? opts.ieIsento;
 	return {
 		nome: destinatario.nome,
 		// O gateway NFCom (Vigo) roteia o elemento XML `CPF` vs `CNPJ` pela
@@ -94,7 +118,7 @@ export function montarPayloadEmitir(input: EmitirNFComInput): ApiNFComEmitir {
 		// rejeitado com `Falha no schema XML`. O domínio carrega o documento
 		// limpo (desmascararDoc); a máscara é aplicada só nesta fronteira.
 		cpfcnpj: mascararDoc(destinatario.cpfcnpj),
-		rgie: destinatario.rgie,
+		rgie,
 		endereco: end.logradouro,
 		endereco_numero: end.numero,
 		bairro: end.bairro,

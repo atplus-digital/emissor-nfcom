@@ -19,7 +19,17 @@ const _env = createEnv({
 		NOCOBASE_API_KEY: z.string().min(1),
 		NOCOBASE_API_URL: z.url(),
 		NOCOBASE_APP: z.string().optional(),
-		
+		/** Id do autenticador NocoBase (header `X-Authenticator` da auth:signIn/check). */
+		NOCOBASE_AUTHENTICATOR: z.string().default("password"),
+
+		// Painel de visualização (login NocoBase + cookie assinado)
+		/**
+		 * Secret do cookie de sessão do painel (`painel_sess`, HMAC-SHA256).
+		 * **Opcional de propósito**: ausente = painel desligado (o server não
+		 * monta as rotas /painel) — não quebra o deploy existente.
+		 */
+		PAINEL_COOKIE_SECRET: z.string().optional(),
+
 		// Asaas (ADR-0004)
 		ASAAS_API_KEY: z.string().min(1),
 		ASAAS_API_URL: z.url(),
@@ -42,6 +52,12 @@ const _env = createEnv({
 		FISCAL_CFOP_DEFAULT: z.string().default("6307"),
 		FISCAL_CCLASS_DEFAULT: z.string().min(1),
 		FISCAL_ICMS_ALIQUOTA: z.coerce.number().min(0).max(1).default(0),
+		// Opcional: placeholder p/ o caso de o gateway exigir um valor numérico
+		// p/ destinatário isento (parceiro com f_ie="ISENTO" — Defeito B). Sem a
+		// env, o campo `rgie` vai omitido no payload; com ela, o valor é enviado
+		// como IE do destinatário. Confirmar com contador/provedor (o boot NÃO
+		// depende dela — `emptyStringAsUndefined` já trata vazio como ausente).
+		FISCAL_IE_ISENTO: z.string().optional(),
 
 		// Logging (ADR-0008): nível default `info`, habilitável por env.
 		LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),

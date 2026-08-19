@@ -38,6 +38,12 @@ export interface FaturasRoutesDeps {
 	 * rotas que não exercitam o cálculo podem omitir).
 	 */
 	defaultsFiscais?: DefaultsFiscais;
+	/**
+	 * Fallback de IE p/ destinatário isento (`env.FISCAL_IE_ISENTO`, ligado pelo
+	 * composition root — Defeito B). Passado a `executarPreparacao` para a
+	 * validação fail-fast de tipo `parceiro` (o domain não lê env, ADR-0004).
+	 */
+	ieIsento?: string;
 }
 
 const prepararBodySchema = z.object({
@@ -71,7 +77,7 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 		// Delega toda a orquestração ao handler de aplicação (ADR-0007 rota fina).
 		const input: PrepararInput = parsed.data;
 		const resultado = await executarPreparacao(
-			{ atacado, defaultsFiscais: deps.defaultsFiscais },
+			{ atacado, defaultsFiscais: deps.defaultsFiscais, ieIsento: deps.ieIsento },
 			input,
 		);
 		return c.json(resultado.corpo, resultado.status as ContentfulStatusCode);
@@ -164,19 +170,19 @@ async function carregarFatura(atacado: AtacadoPort, id: number): Promise<Fatura 
 }
 
 /** Resposta de `GET /faturas/:id/emissao` (SPEC-0001 passo 7). */
-interface EmissaoNota {
+export interface EmissaoNota {
 	id?: number;
 	situacao?: string;
 	chave?: string;
 	protocolo?: string;
 }
-interface EmissaoCobranca {
+export interface EmissaoCobranca {
 	id?: number;
 	status: string;
 	boletoUrl?: string;
 	notas: EmissaoNota[];
 }
-interface EmissaoErro {
+export interface EmissaoErro {
 	id: number;
 	cobrancaId?: number;
 	notaId?: number;
@@ -184,15 +190,19 @@ interface EmissaoErro {
 	mensagem: string;
 	statusCode?: string;
 }
-interface EmissaoResponse {
+export interface EmissaoResponse {
 	faturaId?: number;
 	status: string;
 	cobrancas: EmissaoCobranca[];
 	erros: EmissaoErro[];
 }
 
-/** Serializa o estado de emissão (GET /emissao). */
-function serializarEmissao(fatura: Fatura, erros: ErroEmissao[]): EmissaoResponse {
+/**
+ * Serializa o estado de emissão (GET /emissao). **Exportado** p/ reuso no
+ * painel (`painel-serialize.ts` — `serializarEmissaoPainel`); a rota existente
+ * continua usando a mesma função (comportamento idêntico).
+ */
+export function serializarEmissao(fatura: Fatura, erros: ErroEmissao[]): EmissaoResponse {
 	return {
 		faturaId: fatura.id,
 		status: fatura.status,
