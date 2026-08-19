@@ -47,9 +47,7 @@ mock.module("bullmq", () => ({ Queue: FakeQueue, Worker: class {} }));
 
 // Import modules that depend on env/ioredis/bullmq AFTER mocks are registered.
 const { getRedis } = await import("#/lib/redis");
-const { getQueue, rateLimitFor, WORKER_DEFAULTS, gracefulShutdown } = await import(
-	"#/lib/queues"
-);
+const { getQueue, WORKER_DEFAULTS, gracefulShutdown } = await import("#/lib/queues");
 const { Queue } = await import("bullmq");
 
 beforeEach(() => {
@@ -103,12 +101,6 @@ describe("queues", () => {
 		expect(a).not.toBe(b);
 		// emissao já construída (cache do teste anterior); webhook é nova
 		expect(queueCtorCalls.map((c) => c.name)).toContain(QUEUE_NAMES.WEBHOOK);
-	});
-
-	it("rateLimitFor returns BullMQ rate-limit options from env per provider", () => {
-		expect(rateLimitFor("asaas")).toEqual({ max: 5, duration: 1000 });
-		expect(rateLimitFor("nfcom")).toEqual({ max: 2, duration: 1000 });
-		expect(rateLimitFor("atacado")).toEqual({ max: 10, duration: 1000 });
 	});
 
 	it("WORKER_DEFAULTS has 5 attempts with exponential backoff (ADR-0002)", () => {
