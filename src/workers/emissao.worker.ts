@@ -33,6 +33,7 @@ import { acquireLease, reassumirLeaseSeStale, releaseLease } from "#/lib/db/leas
 import { enqueueOutbox } from "#/lib/db/outbox";
 import { mapearSituacaoNota } from "#/domain/emissao/situacao";
 import { consolidarFatura, hojeEmSP, type ResultadoCobranca } from "#/domain/emissao/consolidacao";
+import { mascararDoc } from "#/domain/fatura/cpf-cnpj";
 import { runWithLogContext, log } from "#/lib/logger";
 import type { AtacadoPort } from "#/domain/ports/atacado.port";
 import type { AsaasPort } from "#/domain/ports/asaas.port";
@@ -227,6 +228,53 @@ async function marcarNotaErroEOutbox(
 		aggregateId: notaId,
 		payload: { op: "registrarErro", notaId, erro, mensagem },
 	});
+}
+
+/**
+ * Detecta a rejeição `Duplicidade de NFCom [nProt:...]` do gateway (HTTP 500 +
+ * body `status: Erro`), que o client traduz em `NfcomApiError` cuja mensagem
+ * contém o texto. É o sinal de que a nota JÁ foi autorizada por uma emissão
+ * anterior (issue #4, Falha B) — deve reconciliar para `emitida`, não `erro`.
+ */
+function ehDuplicidadeNFCom(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err);
+	return /duplicidade de nfcom/i.test(msg);
+}
+
+/**
+ * Janela de datas para a inspeção em `/api/lista` (ISO UTC, `YYYY-MM-DD`).
+ * SEFAZ pode ter latência curta entre autorizar e indexar na lista — usa hoje
+ * ±1 dia. Derivado de `hojeEmSP()` (fuso do domínio America/Sao_Paulo, M9) —
+ * o `new Date()` fica dentro da função (chamada), não em nível de módulo,
+ * seguindo a convenção de timestamps do arquivo.
+ */
+function janelaInspecao(): { inicio: string; fim: string } {
+	const hoje = hojeEmSP();
+	const ano = Number(hoje.slice(0, 4));
+	const mes = Number(hoje.slice(5, 7));
+	const dia = Number(hoje.slice(8, 10));
+	const hojeNum = new Date(Date.UTC(ano, mes - 1, dia));
+	const inicio = new Date(hojeNum.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+	const fim = new Date(hojeNum.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+	return { inicio, fim };
+}
+
+/**
+ * Busca no `/api/lista` a nota AUTORIZADA do mesmo destinatário na janela curta
+ * de inspeção (hoje ±1 dia). `/api/lista` exige `cpfcnpj` MASCARADO — verificado
+ * no swagger (`GET api/lista?cpfcnpj=07.994.598/0001-20`): o gateway Vigo roteia
+ * CPF/CNPJ pela formatação (issue #2), e o `consultaLista` do client passa o
+ * parâmetro sem mascarar. O domínio carrega o documento limpo; a máscara é
+ * aplicada só nesta fronteira, como já faz o `montarPayloadEmitir` no `/api/emitir`.
+ */
+async function buscarNotaAutorizada(
+	deps: EmissaoDeps,
+	d: EmitNfcomData,
+): Promise<{ chave: string; protocolo: string } | null> {
+	const { inicio, fim } = janelaInspecao();
+	const itens = await deps.nfcom.consultarLista(mascararDoc(d.destinatario.cpfcnpj), inicio, fim);
+	const aut = itens.find((i) => /autorizada/i.test(i.situacao));
+	return aut ? { chave: aut.chave, protocolo: aut.protocolo } : null;
 }
 
 // ============================================================
@@ -597,9 +645,17 @@ export async function handleEmitNfcom(
 			await webhookNota("emitida");
 			return { notaOk: true, statusInterno: "emitida" };
 		}
-		// in_progress: se é retry (attemptsMade > 0) e ainda não resolvido → caso 15
-		// (crash entre POST e resolveKey). NÃO re-emite → erro + inspeção.
-		if (job.attemptsMade > 0 && acquired.status === "in_progress") {
+		// in_progress e ESTE job NÃO é o dono da key (acquired=false) → outro job
+		// (ou um retry/crash do dono original) está/esteve emitindo. NÃO re-emite
+		// (zero auto-duplicação) → inspeção (caso 15). O guard se baseia na POSSE da
+		// key (acquired.acquired), não no histórico do job (attemptsMade): cobre tanto
+		// o retry do mesmo job pós-crash (dono stallou entre POST e resolveKey) quanto
+		// um 2º job distinto (attemptsMade===0, mas acquired=false — outro é o dono).
+		// Issue #4: antes, um 2º job com attemptsMade===0 passava direto e re-emitia
+		// uma nota já autorizada (o gateway respondia Duplicidade de NFCom → a nota
+		// ia a erro mesmo estando autorizada). Hoje o guard é robusto a qualquer job
+		// que não detém a key.
+		if (acquired.status === "in_progress" && !acquired.acquired) {
 			const msg = "suspeita de emissão (crash pós-POST) — inspeção manual via /api/lista";
 			await marcarNotaErroEOutbox(db, d.notaId, "NFCOM_DEDUP", msg);
 			await webhookNota("erro", [{ cobrancaId: d.cobrancaId, tipo: "FATAL", mensagem: msg }]);
@@ -676,8 +732,52 @@ export async function handleEmitNfcom(
 				// processando → deixa o BullMQ retryar (não marca erro)
 				throw err;
 			}
-			// erro local (timeout/rede/401 exausto) ou fatal reportado pelo gateway
 			const msg = err instanceof Error ? err.message : String(err);
+			// Duplicidade de NFCom: a nota JÁ foi autorizada por um job anterior (cuja
+			// key se perdeu — ex.: banco de coordenação resetado entre POST e resolveKey).
+			// O gateway devolve o nProt da nota existente. Reconcilia via /api/lista
+			// (cpfcnpj+janela) → marca emitida com a chave/protocolo reais, em vez de
+			// erro (Falha B — issue #4).
+			if (ehDuplicidadeNFCom(err)) {
+				// A inspeção (`/api/lista`) pode falhar (rede/timeout/401 — `consultarLista`
+				// NÃO tem retry de reauth como `emitirComRetry`, ADR-0001). NÃO deixamos o
+				// erro escapar do catch (deixaria a nota em `a-emitir` sem outbox e falharia
+				// o job exausto no BullMQ): falha de inspeção → caminho conservador (erro +
+				// inspeção), igual a "não achou a nota na lista". (robustez do Fix 2)
+				let encontrada: { chave: string; protocolo: string } | null = null;
+				try {
+					encontrada = await buscarNotaAutorizada(deps, d);
+				} catch (inspErr) {
+					log.warn(
+						{ err: inspErr, notaId: d.notaId },
+						"inspeção /api/lista falhou na reconciliação de duplicidade — caminho conservador",
+					);
+				}
+				if (encontrada) {
+					await resolveKey(db, key, encontrada.chave);
+					await enqueueOutbox(db, {
+						aggregate: "nota",
+						aggregateId: d.notaId,
+						payload: {
+							op: "atualizarStatusNota",
+							id: d.notaId,
+							statusInterno: "emitida",
+							situacao: "autorizada",
+							chave: encontrada.chave,
+							protocolo: encontrada.protocolo,
+						},
+					});
+					await webhookNota("emitida");
+					log.warn({ notaId: d.notaId }, "duplicidade NFCom reconciliada p/ emitida (nota já autorizada)");
+					return { notaOk: true, statusInterno: "emitida" };
+				}
+				// não achou na lista → duplicidade sem prova; inspeção (não assume emitida)
+				const insp = `Duplicidade de NFCom sem nota localizada na inspeção — ${msg}`;
+				await marcarNotaErroEOutbox(db, d.notaId, "NFCOM_DEDUP", insp);
+				await webhookNota("erro", [{ cobrancaId: d.cobrancaId, tipo: "FATAL", mensagem: insp }]);
+				return { notaOk: false, statusInterno: "erro", erro: insp };
+			}
+			// erro local (timeout/rede/401 exausto) ou fatal reportado pelo gateway
 			await marcarNotaErroEOutbox(db, d.notaId, "NFCOM", msg);
 			await webhookNota("erro", [{ cobrancaId: d.cobrancaId, tipo: "FATAL", mensagem: msg }]);
 			log.error({ err, notaId: d.notaId }, "emissão de nota falhou");

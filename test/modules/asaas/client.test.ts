@@ -26,6 +26,24 @@ const NO_ENV_OPTS = {
 } as const;
 
 describe("asaas.client · buscarCustomerPorDocumento", () => {
+	it("normaliza baseUrl com sufixo /v3 (evita path /v3/v3/... → 404)", async () => {
+		// Regressão: .env legado trazia `ASAAS_API_URL=.../v3` e o cliente
+		// anexava `/v3/customers` → `/v3/v3/customers` → 404. O cliente agora
+		// trima o sufixo /v3 do baseUrl.
+		const f = fakeFetch({ status: 200, body: { data: [], totalCount: 0 } });
+		const client = createAsaasClient({
+			fetchImpl: f,
+			baseUrl: "https://api-sandbox.asaas.com/v3",
+			apiKey: "test-key",
+		});
+		await client.buscarCustomerPorDocumento("111");
+		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		expect(url).toBe(
+			"https://api-sandbox.asaas.com/v3/customers?cpfCnpj=111",
+		);
+		expect(url).not.toContain("/v3/v3/");
+	});
+
 	it("GET /v3/customers?cpfCnpj= e retorna o envelope {data,totalCount}", async () => {
 		const f = fakeFetch({
 			status: 200,

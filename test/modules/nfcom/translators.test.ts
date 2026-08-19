@@ -76,7 +76,9 @@ describe("montarPayloadEmitir", () => {
 		expect(payload).not.toHaveProperty("cclass");
 		// endereço e dados do destinatário sobem ao topo (flat):
 		expect(payload.nome).toBe(input.destinatario.nome);
-		expect(payload.cpfcnpj).toBe(input.destinatario.cpfcnpj);
+		// cpfcnpj é mascarado na fronteira do gateway NFCom (Vigo roteia
+		// CPF/CNPJ pela formatação, não pelo comprimento): 11 dígitos → CPF.
+		expect(payload.cpfcnpj).toBe("111.222.333-44");
 		expect(payload.endereco).toBe(input.destinatario.endereco.logradouro);
 		expect(payload.endereco_numero).toBe(input.destinatario.endereco.numero);
 		expect(payload.bairro).toBe(input.destinatario.endereco.bairro);
@@ -129,6 +131,24 @@ describe("montarPayloadEmitir", () => {
 		expect(primeiroItem.unitario).toBe(150.0);
 		expect(primeiroItem.total).toBe(300.0);
 		expect(primeiroItem.bc_icms).toBe(300.0);
+	});
+
+	it("mascara CNPJ (14 dígitos) — regressão do bug do gateway NFCom", () => {
+		// O gateway NFCom (Vigo) roteia o elemento XML CPF vs CNPJ pela
+		// presença dos caracteres de formatação, NÃO pelo comprimento. Um
+		// CNPJ limpo (14 dígitos) é lido como CPF (TCpf aceita só 11) e
+		// rejeitado com "Falha no schema XML". O translator deve mascarar.
+		const payload = montarPayloadEmitir({
+			...input,
+			destinatario: { ...input.destinatario, cpfcnpj: "31907797000139" },
+		});
+		expect(payload.cpfcnpj).toBe("31.907.797/0001-39");
+		// já mascarado no input não é corrompido
+		const mascarado = montarPayloadEmitir({
+			...input,
+			destinatario: { ...input.destinatario, cpfcnpj: "31.907.797/0001-39" },
+		});
+		expect(mascarado.cpfcnpj).toBe("31.907.797/0001-39");
 	});
 });
 

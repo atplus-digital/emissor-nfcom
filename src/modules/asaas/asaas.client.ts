@@ -93,12 +93,17 @@ export function createAsaasClient(
 ): AsaasClient {
 	const fetchImpl = opts.fetchImpl ?? fetch;
 	// Resolve baseUrl/apiKey: opts injetados (testes) prevalecem; senão lê env lazy.
+	// Normaliza baseUrl sem o sufixo /v3 — os paths já o incluem
+	// (`/v3/customers`, `/v3/payments`). Um .env com `.../v3` duplicaria o
+	// prefixo em `/v3/v3/...` (404). `.env.example` documenta o SEM /v3;
+	// este trim é defesa contra configs legadas/com /v3.
 	const resolveCreds = async () => {
+		const trimBase = (u: string) => u.replace(/\/v3\/?$/, "");
 		if (opts.baseUrl && opts.apiKey)
-			return { baseUrl: opts.baseUrl, apiKey: opts.apiKey };
+			return { baseUrl: trimBase(opts.baseUrl), apiKey: opts.apiKey };
 		const e = await envOrThrow();
 		return {
-			baseUrl: opts.baseUrl ?? e.baseUrl,
+			baseUrl: trimBase(opts.baseUrl ?? e.baseUrl),
 			apiKey: opts.apiKey ?? e.apiKey,
 		};
 	};

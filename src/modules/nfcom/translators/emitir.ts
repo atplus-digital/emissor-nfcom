@@ -7,6 +7,7 @@
  * para `EmitirNFComResultado` (domínio), normalizando a situação (lowercase)
  * e mapeando `pdf`→`pdfUrl`, `xml`→`xmlUrl`.
  */
+import { mascararDoc } from "#/domain/fatura/cpf-cnpj";
 import type { Item } from "#/domain/types";
 import type {
 	EmitirNFComInput,
@@ -87,7 +88,12 @@ export function montarPayloadEmitir(input: EmitirNFComInput): ApiNFComEmitir {
 	const end = destinatario.endereco;
 	return {
 		nome: destinatario.nome,
-		cpfcnpj: destinatario.cpfcnpj,
+		// O gateway NFCom (Vigo) roteia o elemento XML `CPF` vs `CNPJ` pela
+		// presença dos caracteres de formatação, não pelo comprimento — um
+		// CNPJ limpo (14 dígitos) é lido como CPF (TCpf aceita só 11) e
+		// rejeitado com `Falha no schema XML`. O domínio carrega o documento
+		// limpo (desmascararDoc); a máscara é aplicada só nesta fronteira.
+		cpfcnpj: mascararDoc(destinatario.cpfcnpj),
 		rgie: destinatario.rgie,
 		endereco: end.logradouro,
 		endereco_numero: end.numero,

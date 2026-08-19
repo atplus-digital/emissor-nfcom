@@ -16,11 +16,12 @@ export interface DefaultsFiscais {
 /**
  * Default de fallback usado quando o caller não injeta (ex.: testes de rotas que
  * não exercitam o cálculo). Em produção o composition root injeta `env.FISCAL_*`.
- * Valores provisórios (Revisão humana da SPEC-0002).
+ * Valores da tabela NFCom: 6307 (comunicação a não contribuinte, interestadual),
+ * 0100201 (assinatura de comunicação de dados). Revisar com contador (SPEC-0002).
  */
 export const DEFAULTS_FISCAIS_PADRAO: DefaultsFiscais = {
-	cfop: "6102",
-	cclass: "",
+	cfop: "6307",
+	cclass: "0100201",
 	aliqIcms: 0,
 };
 

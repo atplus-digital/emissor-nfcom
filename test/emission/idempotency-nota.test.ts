@@ -55,6 +55,43 @@ describe("SPEC-0001 caso 15 — dedup de nota (não re-emite → inspeção)", (
 		expect(msgs.some((m) => (m.payload as any).op === "registrarErro" && (m.payload as any).notaId === baseData.notaId)).toBe(true);
 	});
 
+	test("2º job distinto (attemptsMade=0) com key in_progress de outro job → NÃO re-emite, inspeção (issue #4)", async () => {
+		// Falha A (issue #4): antes o guard do caso 15 só disparava com
+		// `attemptsMade > 0`. Um 2º job enfileirado independentemente tem
+		// `attemptsMade === 0` e passava direto → re-emitia uma nota já autorizada.
+		// O guard agora se baseia na POSSE da key (`acquired.acquired=false` +
+		// `in_progress` = outro detém), não no histórico do job. Este teste semeia
+		// a key `in_progress` (externalId null) como se outro job a tivesse criado.
+		const db = await mkDb();
+		await db.insert(idempotencyKeys).values({
+			key: `nfcom:${baseData.notaId}:emitir`,
+			target: "nfcom",
+			externalId: null,
+			status: "in_progress",
+			createdAt: "2026-08-17T00:00:00Z",
+			updatedAt: "2026-08-17T00:00:00Z",
+		});
+		const nfcom = {
+			emitirNFCom: mock(() => Promise.reject(new Error("não deve re-emitir"))),
+			autenticar: mock(() => Promise.resolve("tok")),
+			consultarLista: mock(() => Promise.resolve([])),
+		} as unknown as NfcomPort;
+
+		const res = await handleEmitNfcom(
+			{ data: baseData, attemptsMade: 0, opts: {} } as any,
+			{ db, nfcom, asaas: {} as any, atacado: {} as any },
+		);
+
+		// 2º job distinto não re-emite: o dono original da key (1º job) cuidará da resolução.
+		expect(nfcom.emitirNFCom).toHaveBeenCalledTimes(0);
+		expect(res.notaOk).toBe(false);
+		expect(res.statusInterno).toBe("erro");
+		const { drainOutbox } = await import("#/lib/db/outbox");
+		const msgs = await drainOutbox(db, 10);
+		expect(msgs.some((m) => (m.payload as any).op === "atualizarStatusNota" && (m.payload as any).statusInterno === "erro")).toBe(true);
+		expect(msgs.some((m) => (m.payload as any).op === "registrarErro" && (m.payload as any).notaId === baseData.notaId)).toBe(true);
+	});
+
 	test("1ª tentativa com key in_progress → emite normalmente", async () => {
 		const db = await mkDb();
 		const nfcom = {

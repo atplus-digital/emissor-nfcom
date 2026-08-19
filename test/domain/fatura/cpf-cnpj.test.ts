@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { validarCNPJ, validarCPF } from "#/domain/fatura/cpf-cnpj";
+import { desmascararDoc, mascararDoc, validarCNPJ, validarCPF } from "#/domain/fatura/cpf-cnpj";
 
 describe("validarCPF", () => {
 	it("aceita CPF válido com dígito correto", () => {
@@ -40,5 +40,29 @@ describe("validarCNPJ", () => {
 
 	it("rejeita CNPJ com todos os dígitos iguais", () => {
 		expect(validarCNPJ("11111111111111")).toBe(false);
+	});
+});
+
+describe("mascararDoc / desmascararDoc", () => {
+	it("mascara CPF 11 dígitos → XXX.XXX.XXX-XX", () => {
+		expect(mascararDoc("11122233344")).toBe("111.222.333-44");
+	});
+
+	it("mascara CNPJ 14 dígitos → XX.XXX.XXX/XXXX-XX", () => {
+		expect(mascararDoc("31907797000139")).toBe("31.907.797/0001-39");
+	});
+
+	it("idempotente: documento já mascarado não é corrompido", () => {
+		expect(mascararDoc("31.907.797/0001-39")).toBe("31.907.797/0001-39");
+		expect(mascararDoc("111.222.333-44")).toBe("111.222.333-44");
+	});
+
+	it("tamanho desconhecido retorna inalterado", () => {
+		expect(mascararDoc("12345")).toBe("12345");
+	});
+
+	it("desmascararDoc remove pontos/barras/traços", () => {
+		expect(desmascararDoc("31.907.797/0001-39")).toBe("31907797000139");
+		expect(desmascararDoc("111.222.333-44")).toBe("11122233344");
 	});
 });
