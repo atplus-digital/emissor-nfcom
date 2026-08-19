@@ -193,14 +193,22 @@ export class AtacadoRepository implements AtacadoPort {
 	 * árvore da primeira fatura da lista, não da alvo.
 	 */
 	async removerArvore(faturaId: number): Promise<void> {
-		const fatura = (await this.client.get(COL.faturas, {
-			filterByTk: faturaId,
-			appends: [
-				"f_cobrancas",
-				"f_cobrancas.f_notas_fiscais",
-				"f_cobrancas.f_notas_fiscais.f_nota_itens",
-			],
-		})) as FaturaExterna | undefined;
+		let fatura: FaturaExterna | undefined;
+		try {
+			fatura = (await this.client.get(COL.faturas, {
+				filterByTk: faturaId,
+				appends: [
+					"f_cobrancas",
+					"f_cobrancas.f_notas_fiscais",
+					"f_cobrancas.f_notas_fiscais.f_nota_itens",
+				],
+			})) as FaturaExterna;
+		} catch (err) {
+			// 404 = fatura já inexistente → rollback é idempotente (nada a remover).
+			// Outros erros propagam (5xx do Atacado durante rollback).
+			if (err instanceof AtacadoError && err.statusCode === 404) return;
+			throw err;
+		}
 		if (!fatura?.f_cobrancas) return;
 
 		for (const cob of fatura.f_cobrancas as CobrancaExterna[]) {

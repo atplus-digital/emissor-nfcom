@@ -160,7 +160,19 @@ export function createAtacadoClient(
 				url(baseUrl, colecao, "get", query as Record<string, unknown>),
 				{ method: "GET", headers: headers(apiKey, app) },
 			);
-			return unwrapData(raw);
+			const data = unwrapData(raw);
+			// NocoBase `:get` de id inexistente responde 200 com `{ data: null }`
+			// (NÃO 404). Sem normalizar, o `null` vaza para o caller e o translator
+			// estoura em `e.id`. Lança 404 — os callers de registro único já mapeiam
+			// `AtacadoError(404)` → null.
+			if (data === null || data === undefined) {
+				throw new AtacadoError(
+					`Atacado: registro não encontrado em ${colecao}`,
+					404,
+					JSON.stringify(raw) ?? "",
+				);
+			}
+			return data;
 		},
 		async list(colecao, query) {
 			const { baseUrl, apiKey, app } = await resolveCreds();

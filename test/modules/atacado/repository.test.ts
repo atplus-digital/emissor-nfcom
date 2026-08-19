@@ -318,6 +318,66 @@ describe("AtacadoRepository > buscarClientesAtivosPorParceiro — 404 → []", (
 	});
 });
 
+describe("AtacadoRepository > buscarPlanosDeServico", () => {
+	it("mapeia t_planos_de_servico p/ Plano (preço em centavos)", async () => {
+		const { client, calls } = mockClient({
+			list: async () => [
+				{ id: 1, f_nome: "Internet 500MB", f_assinatura_mensal: 99.9 },
+				{ id: 2, f_nome: "Voz", f_assinatura_mensal: 25.5 },
+			],
+		});
+		const repo = new AtacadoRepository(client);
+		const planos = await repo.buscarPlanosDeServico();
+		expect(planos).toEqual([
+			{ id: 1, descricao: "Internet 500MB", preco: 9990 },
+			{ id: 2, descricao: "Voz", preco: 2550 },
+		]);
+		expect(calls.list[0][0]).toContain("t_planos");
+	});
+});
+
+describe("AtacadoRepository > getFaturaPorId", () => {
+	it("retorna Fatura (get :get com appends da árvore)", async () => {
+		const { client, calls } = mockClient({
+			get: async () => ({
+				id: 101,
+				f_fk_parceiro: 42,
+				f_data_referencia: "2026-08-01",
+				f_data_vencimento: "2026-09-10",
+				f_valor_total: 123.45,
+				f_tipo_de_faturamento: "cofaturamento",
+				f_status: "a-emitir",
+				f_cobrancas: [],
+			}),
+		});
+		const repo = new AtacadoRepository(client);
+		const f = await repo.getFaturaPorId(101);
+		expect(f!.id).toBe(101);
+		expect(f!.valorTotal).toBe(12345);
+		expect(calls.get[0]).toMatchObject(["t_nfcom_faturas", expect.objectContaining({ filterByTk: 101 })]);
+	});
+
+	it("404 → null (fatura não encontrada)", async () => {
+		const { client } = mockClient({
+			get: async () => {
+				throw new AtacadoError("Atacado 404", 404, "not found");
+			},
+		});
+		const repo = new AtacadoRepository(client);
+		expect(await repo.getFaturaPorId(999)).toBeNull();
+	});
+
+	it("propaga erro não-404 (ex.: 500)", async () => {
+		const { client } = mockClient({
+			get: async () => {
+				throw new AtacadoError("Atacado 500", 500, "boom");
+			},
+		});
+		const repo = new AtacadoRepository(client);
+		await expect(repo.getFaturaPorId(1)).rejects.toBeInstanceOf(AtacadoError);
+	});
+});
+
 describe("AtacadoRepository > buscarFaturaPorChave", () => {
 	it("retorna Fatura quando encontra (com cobranças/notas/itens)", async () => {
 		const { client } = mockClient({

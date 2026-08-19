@@ -4,6 +4,16 @@ import {
 	createAtacadoClient,
 } from "#/modules/atacado/atacado.client";
 
+// Mock do env ANTES dos imports dinâmicos (o client lê `#/env` lazy quando o
+// caller não injeta as creds — mesmo padrão do test/integration/flow.test.ts).
+mock.module("#/env", () => ({
+	env: {
+		NOCOBASE_API_URL: "https://atacado.env.test/api",
+		NOCOBASE_API_KEY: "env-key",
+		NOCOBASE_APP: "env-app",
+	},
+}));
+
 /** fetch fake — retorna Response-like com status + json/text (o cliente lê
  * `text` via httpFetch, ADR-0005). Sem `text` explícito, serializa o `body`. */
 function fakeFetch(response: {
@@ -78,6 +88,20 @@ describe("atacado.client · lazy env / injetável", () => {
 		expect(r).toEqual({ id: 17, f_razao_social: "Mateus" });
 	});
 
+	it("get: id inexistente (200 { data: null }) → AtacadoError 404", async () => {
+		// NocoBase `:get` de id inexistente NÃO responde 404 — responde 200 com
+		// `{ data: null }`. Sem a normalização o `null` vaza e o translator
+		// estoura em `e.id` (regressão: GET /faturas/:id/emissao → 500).
+		const f = fakeFetch({ status: 200, body: { data: null } });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await expect(
+			client.get("t_nfcom_faturas", { filterByTk: 99999999 }),
+		).rejects.toBeInstanceOf(AtacadoError);
+		await expect(
+			client.get("t_nfcom_faturas", { filterByTk: 99999999 }),
+		).rejects.toMatchObject({ statusCode: 404 });
+	});
+
 	it("create: extrai o registro do envelope NocoBase { data }", async () => {
 		const f = fakeFetch({
 			status: 200,
@@ -147,5 +171,77 @@ describe("atacado.client · AtacadoError", () => {
 		expect(new AtacadoError("x", 404, "").isRetryable()).toBe(false);
 		expect(new AtacadoError("x", 422, "").isRetryable()).toBe(false);
 		expect(new AtacadoError("x", 400, "").isRetryable()).toBe(false);
+	});
+});
+
+describe("atacado.client · env lazy (sem opts injetados)", () => {
+	it("usa env.NOCOBASE_* quando o caller não injeta creds", async () => {
+		const f = fakeFetch({ status: 200, body: { id: 1 } });
+		const client = createAtacadoClient({ fetchImpl: f });
+		await client.get("t_parceiros", { filterByTk: 1 });
+		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		expect(url).toContain("https://atacado.env.test/api/t_parceiros:get");
+		const init = (f as unknown as ReturnType<typeof mock>).mock.calls[0][1] as RequestInit;
+		const headers = init.headers as Record<string, string>;
+		expect(headers.Authorization).toBe("Bearer env-key");
+		expect(headers["X-App"]).toBe("env-app");
+	});
+});
+
+describe("atacado.client · update/destroy (POST :action, NocoBase)", () => {
+	it("update: POST :update com filterByTk e body JSON; 204 vazio → resolve", async () => {
+		const f = fakeFetch({ status: 204, text: "" });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await client.update("t_nfcom_faturas", 101, { f_status: "emitindo" });
+		const init = (f as unknown as ReturnType<typeof mock>).mock.calls[0][1] as RequestInit;
+		expect(init.method).toBe("POST");
+		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		expect(url).toContain("t_nfcom_faturas:update");
+		expect(url).toContain("filterByTk=101");
+		expect(JSON.parse(String(init.body))).toEqual({ f_status: "emitindo" });
+	});
+
+	it("update não-2xx → AtacadoError com status e detail", async () => {
+		const f = fakeFetch({ status: 500, text: "boom" });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		const err = await client.update("t_nfcom_faturas", 101, {}).catch((e: Error) => e);
+		expect(err).toBeInstanceOf(AtacadoError);
+		expect((err as AtacadoError).statusCode).toBe(500);
+		expect((err as AtacadoError).detail).toBe("boom");
+	});
+
+	it("destroy: POST :destroy com filterByTk; 204 → resolve", async () => {
+		const f = fakeFetch({ status: 204, text: "" });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await client.destroy("t_nfcom_cobrancas", 456);
+		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		expect(url).toContain("t_nfcom_cobrancas:destroy");
+		expect(url).toContain("filterByTk=456");
+	});
+
+	it("destroy não-2xx → AtacadoError", async () => {
+		const f = fakeFetch({ status: 404, text: "not found" });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		const err = await client.destroy("t_nfcom_cobrancas", 456).catch((e: Error) => e);
+		expect(err).toBeInstanceOf(AtacadoError);
+		expect((err as AtacadoError).statusCode).toBe(404);
+	});
+});
+
+describe("atacado.client · list (envolvido ou array direto)", () => {
+	it("resposta { data: [...] } → array; array direto → array", async () => {
+		const f1 = fakeFetch({ status: 200, body: { data: [{ id: 1 }, { id: 2 }] } });
+		const c1 = createAtacadoClient({ fetchImpl: f1, ...NO_ENV_OPTS });
+		expect(await c1.list("t_clientes", {})).toEqual([{ id: 1 }, { id: 2 }]);
+
+		const f2 = fakeFetch({ status: 200, body: [{ id: 9 }] });
+		const c2 = createAtacadoClient({ fetchImpl: f2, ...NO_ENV_OPTS });
+		expect(await c2.list("t_clientes", {})).toEqual([{ id: 9 }]);
+	});
+
+	it("list não-2xx → AtacadoError (requestJson)", async () => {
+		const f = fakeFetch({ status: 503, text: "down" });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await expect(client.list("t_clientes", {})).rejects.toBeInstanceOf(AtacadoError);
 	});
 });
