@@ -79,11 +79,6 @@ export function computeDiff(tempDir: string, outputDir: string): DiffResult {
 	return { changedFiles, unchangedFiles, deletedFiles };
 }
 
-export function backupDir(sourceDir: string, backupDirPath: string): void {
-	if (!fs.existsSync(sourceDir)) return;
-	fs.cpSync(sourceDir, backupDirPath, { recursive: true });
-}
-
 export function swapTempToOutput(tempDir: string, outputDir: string): void {
 	const outputParent = path.dirname(outputDir);
 	if (!fs.existsSync(outputParent)) {

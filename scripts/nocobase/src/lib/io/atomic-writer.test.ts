@@ -30,7 +30,6 @@ import {
 	validateTypeScriptFiles,
 } from "@generators/lib/validation/tsc-validator";
 import {
-	backupDir,
 	cleanupTempSessionDir,
 	computeDiff,
 	removeDir,
@@ -149,39 +148,6 @@ describe("TC-UT-AW-005: swapTempToOutput replaces existing output", () => {
 
 		expect(fs.existsSync(path.join(outputDir, "new.ts"))).toBe(true);
 		expect(fs.existsSync(path.join(outputDir, "old.ts"))).toBe(false);
-	});
-});
-
-describe("TC-UT-AW-006: backupDir copies directory", () => {
-	const sourceDir = "/tmp/test-backup/source";
-	const backupDirPath = "/tmp/test-backup/backup";
-
-	beforeEach(() => {
-		fs.mkdirSync(sourceDir, { recursive: true });
-		fs.writeFileSync(path.join(sourceDir, "file.ts"), "const x = 1;");
-	});
-
-	afterEach(() => {
-		fs.rmSync("/tmp/test-backup", { recursive: true, force: true });
-	});
-
-	it("should copy source to backup destination", () => {
-		backupDir(sourceDir, backupDirPath);
-
-		expect(fs.existsSync(path.join(backupDirPath, "file.ts"))).toBe(true);
-	});
-});
-
-describe("TC-UT-AW-007: backupDir returns early if source does not exist", () => {
-	const sourceDir = "/tmp/test-backup-missing/source";
-	const backupDirPath = "/tmp/test-backup-missing/backup";
-
-	afterEach(() => {
-		fs.rmSync("/tmp/test-backup-missing", { recursive: true, force: true });
-	});
-
-	it("should not throw when source does not exist", () => {
-		expect(() => backupDir(sourceDir, backupDirPath)).not.toThrow();
 	});
 });
 

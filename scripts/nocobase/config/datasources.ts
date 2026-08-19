@@ -9,7 +9,7 @@ export const dataSourceConfigs: DataSourceGenerationConfig[] = [
 		includeDependents: true,
 		inferRelationsByName: false,
 		// Collections efetivamente consumidas pelo app (módulo `atacado` +
-		// translators). Split = pasta própria em src/generated/types/nocobase/,
+		// translators). Split = pasta própria em packages/generated/types/nocobase/,
 		// em vez de caírem em other/. Mantém o barrel index.ts reexportando tudo.
 		// ⚠️ Use o NOME REAL da collection na API NocoBase (com prefixo `t_` e
 		// underscores), NÃO o slug kebab da pasta — o gerador deriva a pasta via

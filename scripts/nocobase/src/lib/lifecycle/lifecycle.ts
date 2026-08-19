@@ -1,21 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { applyWorkspaceLockIfNeeded } from "@generators/lib/io/locker";
-import { createReportsContext } from "@generators/lib/pipeline/reports";
 import { isValidationSkipped } from "@generators/lib/validation/validation-options";
 import type { TaskRunner } from "@shared/types";
 import type { PipelineExecutionContext } from "../pipeline/context";
 import { type AsyncPipelineStage, runPipelineStages } from "../pipeline/runner";
-import type {
-	LifecycleCtx,
-	LifecycleTaskParams,
-	PipelineJsonReportResult,
-} from "./lifecycle-tasks";
+import type { LifecycleCtx, LifecycleTaskParams } from "./lifecycle-tasks";
 import {
-	backupCurrentOutput,
 	diffTempVsOutput,
 	handleNoChanges,
-	renderReportsSummary,
+	renderDiffSummary,
 	swapTempToOutputDirs,
 	validateGeneratedOutput,
 } from "./lifecycle-tasks";
@@ -29,15 +23,11 @@ interface StandardPipelineOptions<TRuntimeConfig, TPipelineContext> {
 	stages: AsyncPipelineStage<
 		PipelineExecutionContext<TRuntimeConfig, TPipelineContext>
 	>[];
-	label?: string;
-	reportsOutputPath?: string;
-	onReportReady?: (result: PipelineJsonReportResult) => void;
 }
 
 export function runStandardPipeline<TRuntimeConfig, TPipelineContext>(
 	options: StandardPipelineOptions<TRuntimeConfig, TPipelineContext>,
 ): ReturnType<TaskRunner["newListr"]> {
-	const label = options.label ?? "pipeline";
 	const cwd = process.cwd();
 	const timestamp = Date.now();
 	const randomId = Math.random().toString(36).slice(2, 8);
@@ -54,21 +44,14 @@ export function runStandardPipeline<TRuntimeConfig, TPipelineContext>(
 		outputDirs,
 		runtimeConfig,
 		overrideConfig: options.overrideConfig,
-		reports: createReportsContext(),
 		pipelineContext: options.pipelineContext,
 	};
 
-	const taskParams: LifecycleTaskParams<TRuntimeConfig, TPipelineContext> = {
+	const taskParams: LifecycleTaskParams = {
 		tempDir,
 		outputDirs,
-		context,
-		label,
-		reportsOutputPath: options.reportsOutputPath,
 		task: options.task,
 		cwd,
-		timestamp,
-		randomId,
-		onReportReady: options.onReportReady,
 	};
 
 	if (outputDirs.length === 0) {
@@ -127,7 +110,7 @@ export function runStandardPipeline<TRuntimeConfig, TPipelineContext>(
 				task: async (ctx): Promise<void> =>
 					validateGeneratedOutput(ctx as LifecycleCtx, taskParams),
 			},
-			// 4. No changes → cleanup and render reports
+			// 4. No changes → cleanup and summarize
 			{
 				title: "Sem alterações",
 				skip: (ctx): string | boolean =>
@@ -137,13 +120,6 @@ export function runStandardPipeline<TRuntimeConfig, TPipelineContext>(
 				task: async (ctx): Promise<void> =>
 					handleNoChanges(ctx as LifecycleCtx, taskParams),
 			},
-			// 4. Backup current output (only when changes exist)
-			{
-				title: "Realizando backup",
-				skip: (ctx): string | boolean =>
-					!(ctx as LifecycleCtx).hasChanges ? "Sem alterações" : false,
-				task: async (): Promise<void> => backupCurrentOutput(taskParams),
-			},
 			// 5. Swap temp → output (only when changes exist)
 			{
 				title: "Aplicando alterações",
@@ -151,13 +127,13 @@ export function runStandardPipeline<TRuntimeConfig, TPipelineContext>(
 					!(ctx as LifecycleCtx).hasChanges ? "Sem alterações" : false,
 				task: async (): Promise<void> => swapTempToOutputDirs(taskParams),
 			},
-			// 6. Emit report JSON + summary (only when changes exist)
+			// 6. Diff summary (only when changes exist)
 			{
-				title: "Gerando relatórios",
+				title: "Resumo de alterações",
 				skip: (ctx): string | boolean =>
 					!(ctx as LifecycleCtx).hasChanges ? "Sem alterações" : false,
 				task: async (ctx): Promise<void> =>
-					renderReportsSummary(ctx as LifecycleCtx, taskParams),
+					renderDiffSummary(ctx as LifecycleCtx, taskParams),
 			},
 		],
 		{

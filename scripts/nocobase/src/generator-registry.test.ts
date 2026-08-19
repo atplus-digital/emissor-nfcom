@@ -31,7 +31,7 @@ describe("generator-registry", () => {
 
 	it("declares output directories for each generator", () => {
 		expect(GENERATOR_REGISTRY[0].definition.getOutputDirs({})).toContain(
-			"src/generated/types",
+			"packages/generated/types",
 		);
 	});
 });

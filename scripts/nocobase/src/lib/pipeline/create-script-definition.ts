@@ -1,7 +1,6 @@
 import { DEFAULT_LISTR_RENDERER_OPTIONS } from "@generators/lib/cli/listr-config";
 import type { OrchestrationTaskRunner, TaskRunner } from "@shared/types";
 import type { CreateScriptTasksInput } from "../../generator-registry";
-import type { PipelineJsonReportResult } from "../lifecycle/lifecycle-tasks";
 import type { GeneratorDefinition, OrchestrationTaskResult } from "../types";
 
 //@ ──────────────────────────────────────────────
@@ -28,8 +27,6 @@ export interface RunGeneratorCliOptions<TContext = unknown> {
 	stages: CliStage<TContext>[];
 	context: TContext;
 	disableOutput?: boolean;
-	reportsOutputPath?: string;
-	latestReport?: PipelineJsonReportResult;
 }
 
 function runGeneratorCli<TContext>(
@@ -66,7 +63,6 @@ export function createScriptTasks<TContext>(
 			defaultConfig: {},
 			getOutputDirs: noopOutputDirs,
 			stages: [(_, stageTask) => runGeneratorCli(cliOptions, stageTask)],
-			label: cliOptions.name,
 		}),
 	};
 }

@@ -53,7 +53,7 @@ mock.module("@shared/http/nocobase-client", () => ({
 mock.module("../../../../config/datasources", () => ({
 	dataSourceConfigs: [{
 		name: "mock-nocobase", type: "nocobase", dataSource: "main",
-		outputDir: "src/generated/types/nocobase/", collections: ["users"],
+		outputDir: "packages/generated/types/nocobase/", collections: ["users"],
 		splitCollections: [], inferRelationsByName: false,
 	}],
 }));

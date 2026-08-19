@@ -38,7 +38,7 @@ describe("TC-UT-ORCH-001: Sequential run executes generators in order", () => {
 			{
 				name: "types-generator",
 				description: "Generate types",
-				getOutputDirs: () => ["src/generated/types"],
+				getOutputDirs: () => ["packages/generated/types"],
 				createPipelineOptions: () => ({
 					defaultConfig: {},
 					getOutputDirs: () => [],
@@ -49,7 +49,7 @@ describe("TC-UT-ORCH-001: Sequential run executes generators in order", () => {
 			{
 				name: "requests-generator",
 				description: "Generate requests",
-				getOutputDirs: () => ["src/generated/requests"],
+				getOutputDirs: () => ["packages/generated/requests"],
 				createPipelineOptions: () => ({
 					defaultConfig: {},
 					getOutputDirs: () => [],

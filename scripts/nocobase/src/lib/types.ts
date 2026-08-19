@@ -1,4 +1,3 @@
-import type { PipelineJsonReportResult } from "@generators/lib/lifecycle/lifecycle-tasks";
 import type { PipelineExecutionContext } from "@generators/lib/pipeline/context";
 import type { AsyncPipelineStage } from "@generators/lib/pipeline/runner";
 import type { OrchestrationTaskRunner, TaskRunner } from "@shared/types";
@@ -29,9 +28,6 @@ interface StandardPipelineInput<
 	stages: AsyncPipelineStage<
 		PipelineExecutionContext<TRuntimeConfig, TPipelineContext>
 	>[];
-	label?: string;
-	reportsOutputPath?: string;
-	onReportReady?: (result: PipelineJsonReportResult) => void;
 }
 
 type StandardPipelineFactoryInput<

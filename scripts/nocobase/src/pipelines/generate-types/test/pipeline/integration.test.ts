@@ -5,7 +5,6 @@ import { buildTypes } from "@generators/pipelines/generate-types/stages/build-ty
 import { fetchSchemas } from "@generators/pipelines/generate-types/stages/fetch-schemas";
 import { generateContentStage } from "@generators/pipelines/generate-types/stages/generate-content";
 import { writeFilesStage } from "@generators/pipelines/generate-types/stages/write-files";
-import { writeReportsStage } from "@generators/pipelines/generate-types/stages/write-reports";
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { createMockField } from "../factories";
 import { createMockTask, createPipelineContext } from "../helpers";
@@ -20,7 +19,7 @@ describe("generate-types stage integration", () => {
 		tempDirs.length = 0;
 	});
 
-	it("runs fetch → build → content → write → reports end-to-end", async () => {
+	it("runs fetch → build → content → write end-to-end", async () => {
 		const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "gt-integration-"));
 		tempDirs.push(outputDir);
 
@@ -61,7 +60,6 @@ describe("generate-types stage integration", () => {
 		context = await buildTypes(context, createMockTask());
 		context = await generateContentStage(context, createMockTask());
 		context = await writeFilesStage(context, createMockTask());
-		context = await writeReportsStage(context, createMockTask());
 
 		expect(context.pipelineContext?.writeResults?.length).toBeGreaterThan(0);
 		expect(fs.existsSync(path.join(outputDir, "collections.ts"))).toBe(true);
@@ -71,6 +69,5 @@ describe("generate-types stage integration", () => {
 		expect(
 			fs.existsSync(path.join(outputDir, "other", "users", "index.ts")),
 		).toBe(true);
-		expect(Object.keys(context.reports.namespaces).length).toBeGreaterThan(0);
 	});
 });

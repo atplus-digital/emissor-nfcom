@@ -6,7 +6,7 @@ describe("TC-UT-CSD-001: Valid config produces correct script definition shape",
 	it("should create GeneratorDefinition with all required properties", () => {
 		const mockInput: CreateScriptTasksInput = {
 			description: "Test generator",
-			outputDirs: ["src/generated/test"],
+			outputDirs: ["packages/generated/test"],
 			createCliOptions: () => ({
 				name: "test-generator",
 				stages: [
@@ -30,7 +30,7 @@ describe("TC-UT-CSD-001: Valid config produces correct script definition shape",
 	it("should return outputDirs via getOutputDirs function", () => {
 		const mockInput: CreateScriptTasksInput = {
 			description: "Test",
-			outputDirs: ["src/generated/a", "src/generated/b"],
+			outputDirs: ["packages/generated/a", "packages/generated/b"],
 			createCliOptions: () => ({
 				name: "test",
 				stages: [],
@@ -41,8 +41,8 @@ describe("TC-UT-CSD-001: Valid config produces correct script definition shape",
 		const result = createScriptTasks(mockInput);
 
 		expect(result.getOutputDirs({})).toEqual([
-			"src/generated/a",
-			"src/generated/b",
+			"packages/generated/a",
+			"packages/generated/b",
 		]);
 	});
 });
@@ -51,7 +51,7 @@ describe("TC-UT-CSD-002: createPipelineOptions returns proper factory input", ()
 	it("should return StandardPipelineFactoryInput shape", () => {
 		const mockInput: CreateScriptTasksInput = {
 			description: "Test",
-			outputDirs: ["src/generated"],
+			outputDirs: ["packages/generated"],
 			createCliOptions: () => ({
 				name: "test-generator",
 				stages: [
@@ -70,7 +70,6 @@ describe("TC-UT-CSD-002: createPipelineOptions returns proper factory input", ()
 		expect(pipelineOptions).toHaveProperty("defaultConfig", {});
 		expect(pipelineOptions).toHaveProperty("getOutputDirs");
 		expect(pipelineOptions).toHaveProperty("stages");
-		expect(pipelineOptions).toHaveProperty("label", "test-generator");
 		expect(Array.isArray(pipelineOptions.stages)).toBe(true);
 	});
 });
@@ -101,25 +100,6 @@ describe("TC-UT-CSD-003: Multiple stages are preserved in createCliOptions", () 
 	});
 });
 
-describe("TC-UT-CSD-004: cliOptions.name is used as label", () => {
-	it("should use cli name as pipeline label", () => {
-		const mockInput: CreateScriptTasksInput = {
-			description: "Label test",
-			outputDirs: [],
-			createCliOptions: () => ({
-				name: "my-custom-label",
-				stages: [],
-				context: {},
-			}),
-		};
-
-		const result = createScriptTasks(mockInput);
-		const pipelineOptions = result.createPipelineOptions({});
-
-		expect(pipelineOptions.label).toBe("my-custom-label");
-	});
-});
-
 describe("TC-UT-CSD-005: getOutputDirs returns empty array when no outputDirs", () => {
 	it("should return empty array for no outputDirs", () => {
 		const mockInput: CreateScriptTasksInput = {
@@ -142,7 +122,7 @@ describe("TC-UT-CSD-006: createScriptTasks is called once per invocation", () =>
 	it("should create independent definitions for each call", () => {
 		const mockInput: CreateScriptTasksInput = {
 			description: "Independent test",
-			outputDirs: ["src/generated"],
+			outputDirs: ["packages/generated"],
 			createCliOptions: () => ({
 				name: "test",
 				stages: [],
@@ -164,7 +144,7 @@ describe("TC-UT-CSD-008: createPipelineOptions stage runs generator CLI via List
 		const stageRun = vi.fn().mockReturnValue(undefined);
 		const mockInput: CreateScriptTasksInput = {
 			description: "CLI runner test",
-			outputDirs: ["src/generated"],
+			outputDirs: ["packages/generated"],
 			createCliOptions: () => ({
 				name: "cli-runner",
 				stages: [{ title: "Fetch", run: stageRun }],
@@ -206,7 +186,7 @@ describe("TC-UT-CSD-009: createPipelineOptions uses noop output dirs", () => {
 	it("should return empty array from pipeline getOutputDirs", () => {
 		const mockInput: CreateScriptTasksInput = {
 			description: "Noop output dirs",
-			outputDirs: ["src/generated/custom"],
+			outputDirs: ["packages/generated/custom"],
 			createCliOptions: () => ({
 				name: "noop-output",
 				stages: [{ title: "Stage", run: vi.fn() }],
@@ -218,7 +198,7 @@ describe("TC-UT-CSD-009: createPipelineOptions uses noop output dirs", () => {
 		const pipelineOptions = definition.createPipelineOptions({});
 
 		expect(pipelineOptions.getOutputDirs()).toEqual([]);
-		expect(definition.getOutputDirs({})).toEqual(["src/generated/custom"]);
+		expect(definition.getOutputDirs({})).toEqual(["packages/generated/custom"]);
 	});
 });
 

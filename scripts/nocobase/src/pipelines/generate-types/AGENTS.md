@@ -1,11 +1,11 @@
-<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-06-03 -->
+<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-08-19 -->
 <!-- Parent: ../../AGENTS.md -->
 
 # AGENTS.md — pipelines/generate-types
 
 ## Overview
 
-NocoBase + IXC type generation pipeline — fetches collection schemas from both datasources, builds TypeScript interfaces, generates `.ts` source files, and writes validated output to `src/generated/types/`.
+NocoBase + IXC type generation pipeline — fetches collection schemas from both datasources, builds TypeScript interfaces, generates `.ts` source files, and writes validated output to `packages/generated/types/`.
 
 <!-- AGENTS-GENERATED:START structure -->
 
@@ -24,8 +24,7 @@ generate-types/
 │   ├── fetch-schemas.ts       # Stage 1: GET /api/dataSources/{key}/collections:list
 │   ├── build-types.ts         # Stage 2: merge build-types + split-collections
 │   ├── generate-content.ts    # Stage 3: call content/ modules
-│   ├── write-files.ts         # Stage 4: write to .temp/ via atomic-writer
-│   └── write-reports.ts       # Stage 5: populate context.reports via addJsonReport
+│   └── write-files.ts         # Stage 4: write to .temp/ via atomic-writer
 ├── content/
 │   ├── enums.ts               # Enum type generation (from uiSchema.enum)
 │   ├── interfaces.ts          # Interface generation
@@ -57,7 +56,6 @@ Importe com alias quando usar várias collections no mesmo arquivo: `import { TA
 | 2     | `build-types.ts`      | Maps schemas → TS interfaces, applies split logic (e.g., `t_pessoas` → PF/PJ), builds relation types                                            |
 | 3     | `generate-content.ts` | Generates `.ts` source code per collection via `content/` modules                                                                               |
 | 4     | `write-files.ts`      | Writes all files to `.temp/` (never directly to outputDir)                                                                                      |
-| 5     | `write-reports.ts`    | Generates analysis report (unresolved relations, non-split collections, counts) → `addJsonReport()`                                             |
 
 <!-- AGENTS-GENERATED:END stages -->
 
@@ -67,7 +65,7 @@ Importe com alias quando usar várias collections no mesmo arquivo: `import { TA
 
 | Key        | Output Dir                          | Collections                          |
 | ---------- | ----------------------------------- | ------------------------------------ |
-| `nocobase` | `src/generated/types/nocobase/`     | ~118 collections (configured subset) |
-| `ixc`      | `src/generated/types/d_db_ixcsoft/` | ~881 collections (configured subset) |
+| `nocobase` | `packages/generated/types/nocobase/`     | ~118 collections (configured subset) |
+| `ixc`      | `packages/generated/types/d_db_ixcsoft/` | ~881 collections (configured subset) |
 
 <!-- AGENTS-GENERATED:END datasources -->

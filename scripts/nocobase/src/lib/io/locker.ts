@@ -7,7 +7,7 @@ interface VSCodeSettings {
 	[setting: string]: unknown;
 }
 
-const GENERATED_PATTERN = "src/generated/**";
+const GENERATED_PATTERN = "packages/generated/**";
 
 /**
  * Converte um outputDir em um pattern relativo ao workspace usado em

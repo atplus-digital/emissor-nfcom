@@ -31,7 +31,7 @@ mock.module("../../../../config/datasources", () => ({
 		{
 			name: "mock-nocobase",
 			dataSource: "main",
-			outputDir: "src/generated/types/nocobase/",
+			outputDir: "packages/generated/types/nocobase/",
 			collections: ["users"],
 			splitCollections: [],
 		},
@@ -59,7 +59,7 @@ describe("createGenerateTypesPipeline", () => {
 		vi.clearAllMocks();
 	});
 
-	it("returns pipeline definition with stages and reports path", async () => {
+	it("returns pipeline definition with stages", async () => {
 		const { createGenerateTypesPipeline } = await import(
 			"@generators/pipelines/generate-types/pipeline"
 		);
@@ -68,7 +68,6 @@ describe("createGenerateTypesPipeline", () => {
 
 		expect(definition.name).toBe("generate-types");
 		expect(definition.stages).toHaveLength(1);
-		expect(definition.reportsOutputPath).toContain("generate-types");
 		expect(definition.context).toEqual({});
 	});
 
@@ -83,12 +82,8 @@ describe("createGenerateTypesPipeline", () => {
 		await definition.stages[0].run({}, task);
 
 		expect(runStandardPipelineMock).toHaveBeenCalledOnce();
-		expect(runStandardPipelineMock.mock.calls[0][0]).toMatchObject({
-			label: "generate-types",
-			reportsOutputPath: ".reports/generate-types/report.md",
-		});
 		expect(runStandardPipelineMock.mock.calls[0][0].getOutputDirs()).toEqual([
-			"src/generated/types/nocobase/",
+			"packages/generated/types/nocobase/",
 		]);
 	});
 
@@ -122,7 +117,6 @@ describe("createGenerateTypesPipeline", () => {
 				tempDir: "/tmp/pipeline-test",
 				outputDirs: [],
 				runtimeConfig: {},
-				reports: { schemaVersion: 1 as const, namespaces: {} },
 			};
 			for (const stage of options.stages) {
 				const listrResult = await stage(context, lifecycleTask);
@@ -159,8 +153,7 @@ describe("createGenerateTypesPipeline", () => {
 		expect(stageNames).toContain("buildTypes");
 		expect(stageNames).toContain("generateContentStage");
 		expect(stageNames).toContain("writeFilesToTempStage");
-		expect(stageNames).toContain("writeReportsStage");
-		expect(runPipelineStagesMock.mock.calls[0][1]).toHaveLength(5);
+		expect(runPipelineStagesMock.mock.calls[0][1]).toHaveLength(4);
 		expect(
 			runPipelineStagesMock.mock.calls[0][0].pipelineContext.client.baseUrl,
 		).toBe("https://example.com/api");
@@ -192,7 +185,6 @@ describe("createGenerateTypesPipeline", () => {
 				tempDir: "/tmp/types-pipeline",
 				outputDirs: [],
 				runtimeConfig: {},
-				reports: { schemaVersion: 1 as const, namespaces: {} },
 			};
 			for (const stage of options.stages) {
 				const listrResult = await stage(context, lifecycleTask);
@@ -234,7 +226,7 @@ describe("createGenerateTypesPipeline", () => {
 		await writeFilesToTempStage(
 			{
 				tempDir: "/tmp/types-pipeline",
-				runtimeConfig: { outputDir: "src/generated/types/nocobase/" },
+				runtimeConfig: { outputDir: "packages/generated/types/nocobase/" },
 			},
 			createOrchestrationTask(),
 		);
@@ -244,7 +236,7 @@ describe("createGenerateTypesPipeline", () => {
 				runtimeConfig: expect.objectContaining({
 					outputDir: path.join(
 						"/tmp/types-pipeline",
-						"src/generated/types/nocobase/",
+						"packages/generated/types/nocobase/",
 					),
 				}),
 			}),

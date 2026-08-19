@@ -1,6 +1,6 @@
 # Geradores de código
 
-Scripts que buscam schemas e metadados no **NocoBase** (e datasource IXC) e geram artefatos TypeScript em `src/generated/`. O frontend importa esses arquivos — **não edite `src/generated/` manualmente**.
+Scripts que buscam schemas e metadados no **NocoBase** (e datasource IXC) e geram artefatos TypeScript em `packages/generated/`. O frontend importa esses arquivos — **não edite `packages/generated/` manualmente**.
 
 Documentação técnica detalhada (pipelines, estágios, convenções para agentes): [`src/AGENTS.md`](src/AGENTS.md) e os `AGENTS.md` em cada pipeline em `src/pipelines/`.
 
@@ -20,7 +20,7 @@ Opcional: `NOCOBASE_APP=<app>` para enviar o header `X-App` (necessário quando 
 | Comando               | O que gera                                              |
 | --------------------- | ------------------------------------------------------- |
 | `pnpm generate`       | Todos os geradores padrão (types)                       |
-| `pnpm generate:types` | Tipos e labels das collections → `src/generated/types/` |
+| `pnpm generate:types` | Tipos e labels das collections → `packages/generated/types/` |
 
 Flags diretas no orquestrador:
 
@@ -48,7 +48,7 @@ Após regenerar tipos, rode `pnpm typecheck` (ou o subset de testes afetado) ant
 ### Tipos (`generate:types`)
 
 - **Entrada:** schemas das datasources `main` (NocoBase) e `d_db_ixcsoft` (IXC).
-- **Saída:** `src/generated/types/nocobase/` e `src/generated/types/d_db_ixcsoft/`.
+- **Saída:** `packages/generated/types/nocobase/` e `packages/generated/types/d_db_ixcsoft/`.
 - **Config:** [`config/datasources.ts`](config/datasources.ts) — collections incluídas, splits (ex.: `t_pessoas` → PF/PJ), dependentes.
 - **Uso no app:** interfaces (`Pessoas`, `Cliente`, …), `*_LABELS`, `TABLE_NAME` / `TABLE_LABEL` em `schemas.ts`.
 
@@ -57,12 +57,11 @@ Após regenerar tipos, rode `pnpm typecheck` (ou o subset de testes afetado) ant
 1. Busca dados no NocoBase (quando aplicável).
 2. Gera arquivos em diretório temporário (`.temp/`).
 3. Valida com TypeScript e Biome.
-4. Compara diff; em sucesso, substitui `src/generated/`.
-5. Relatórios JSON/Markdown em `.reports/` quando o pipeline os emite.
+4. Compara diff; em sucesso, substitui `packages/generated/`.
 
 ## Regras
 
-- **Não** comitar edições manuais em `src/generated/`.
+- **Não** comitar edições manuais em `packages/generated/`.
 - **Sempre** alterar o config correspondente e rodar o gerador de novo.
 - Tipos de collections devem ser importados de `#/generated/types/...`, nunca redefinidos no código da feature.
 - Labels de enum devem vir dos `*_LABELS` gerados, não de mapas manuais.

@@ -1,5 +1,4 @@
 import type { PipelineExecutionContext } from "@generators/lib/pipeline/context";
-import type { PipelineReportsContext } from "@generators/lib/pipeline/reports";
 import type { DataSourceGenerationConfig } from "@generators/pipelines/generate-types/@types/script";
 import type { GenerateTypesPipelineCtx } from "@generators/pipelines/generate-types/stages/fetch-schemas";
 import type { TaskRunner } from "@shared/types";
@@ -7,13 +6,6 @@ import { vi } from "bun:test";
 
 export function createMockTask(): TaskRunner {
 	return { output: "" } as TaskRunner;
-}
-
-function createMockReports(): PipelineReportsContext {
-	return {
-		schemaVersion: 1,
-		namespaces: {},
-	};
 }
 
 export function createMockDataSourceConfig(
@@ -43,7 +35,6 @@ export function createPipelineContext(
 		tempDir: "/tmp/nocobase-generate-types",
 		outputDirs: [runtimeConfig.outputDir ?? "/tmp/out"],
 		runtimeConfig,
-		reports: createMockReports(),
 		pipelineContext: {
 			dataSource: runtimeConfig,
 			...(overrides.pipelineContext === undefined

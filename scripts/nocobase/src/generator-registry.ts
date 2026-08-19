@@ -23,7 +23,7 @@ const GENERATOR_REGISTRY = [
 		runInDefault: true,
 		definition: createScriptTasks({
 			description: "Generate TypeScript types from NocoBase and IXC schemas",
-			outputDirs: ["src/generated/types"],
+			outputDirs: ["packages/generated/types"],
 			createCliOptions: createGenerateTypesPipeline,
 		}),
 	},

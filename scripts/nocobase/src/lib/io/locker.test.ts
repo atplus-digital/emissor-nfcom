@@ -9,7 +9,7 @@ import { applyWorkspaceLockIfNeeded } from "./locker";
 function createMockSettings(extra = {}): object {
 	return {
 		"files.readonlyInclude": {
-			"src/generated/**": true,
+			"packages/generated/**": true,
 			...extra,
 		},
 	};
@@ -34,7 +34,7 @@ describe("TC-UT-LK-001: applyWorkspaceLockIfNeeded locks workspace when not lock
 	});
 
 	it("should create settings.json with readonlyInclude when not locked", () => {
-		applyWorkspaceLockIfNeeded(["src/generated"], true);
+		applyWorkspaceLockIfNeeded(["packages/generated"], true);
 
 		const settingsPath = path.join(workspaceRoot, ".vscode", "settings.json");
 		expect(fs.existsSync(settingsPath)).toBe(true);
@@ -70,11 +70,11 @@ describe("TC-UT-LK-002: applyWorkspaceLockIfNeeded skips when already locked", (
 	it("should not modify settings when already locked", () => {
 		void fs.readFileSync(settingsPath, "utf-8");
 
-		applyWorkspaceLockIfNeeded(["src/generated"], true);
+		applyWorkspaceLockIfNeeded(["packages/generated"], true);
 
 		const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
 		// The GENERATED_PATTERN is already present, so no change needed
-		expect(settings["files.readonlyInclude"]["src/generated/**"]).toBe(true);
+		expect(settings["files.readonlyInclude"]["packages/generated/**"]).toBe(true);
 	});
 });
 
@@ -96,7 +96,7 @@ describe("TC-UT-LK-003: applyWorkspaceLockIfNeeded skips when lockWorkspaceFolde
 	});
 
 	it("should not create or modify settings when flag is false", () => {
-		applyWorkspaceLockIfNeeded(["src/generated"], false);
+		applyWorkspaceLockIfNeeded(["packages/generated"], false);
 
 		const settingsPath = path.join(workspaceRoot, ".vscode", "settings.json");
 		// Should not throw even if settings.json doesn't exist
@@ -122,7 +122,7 @@ describe("TC-UT-LK-004: applyWorkspaceLockIfNeeded handles missing .vscode dir",
 	});
 
 	it("should create .vscode directory when needed", () => {
-		applyWorkspaceLockIfNeeded(["src/generated"], true);
+		applyWorkspaceLockIfNeeded(["packages/generated"], true);
 
 		const vscodeDir = path.join(workspaceRoot, ".vscode");
 		expect(fs.existsSync(vscodeDir)).toBe(true);
@@ -213,7 +213,7 @@ describe("TC-UT-LK-007: isWorkspaceLocked returns false when no settings", () =>
 		// We test this indirectly through applyWorkspaceLockIfNeeded behavior
 		// The function should just proceed without throwing
 		expect(() =>
-			applyWorkspaceLockIfNeeded(["src/generated"], true),
+			applyWorkspaceLockIfNeeded(["packages/generated"], true),
 		).not.toThrow();
 	});
 });
@@ -237,14 +237,14 @@ describe("TC-UT-LK-008: Lock file path is consistent for same output dir", () =>
 	});
 
 	it("should produce consistent lock entries for same directory", () => {
-		applyWorkspaceLockIfNeeded(["src/generated"], true);
+		applyWorkspaceLockIfNeeded(["packages/generated"], true);
 
-		applyWorkspaceLockIfNeeded(["src/generated"], true);
+		applyWorkspaceLockIfNeeded(["packages/generated"], true);
 		const settings2 = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
 
 		// Should not duplicate entries
 		const count = Object.keys(settings2["files.readonlyInclude"]).filter((k) =>
-			k.includes("src/generated"),
+			k.includes("packages/generated"),
 		).length;
 		expect(count).toBeLessThanOrEqual(2); // GENERATED_PATTERN + the specific path
 	});
@@ -276,7 +276,7 @@ describe("TC-UT-LK-009: isWorkspaceLocked returns false when readonlyInclude is 
 	it("should return false when readonlyInclude is a string", () => {
 		// The function should not throw and should return false
 		expect(() =>
-			applyWorkspaceLockIfNeeded(["src/generated"], true),
+			applyWorkspaceLockIfNeeded(["packages/generated"], true),
 		).not.toThrow();
 		// The workspace should be locked since readonlyInclude is not a valid object
 		// This will add the proper patterns
@@ -338,7 +338,7 @@ describe("TC-UT-LK-012: lockWorkspace surfaces write failures", () => {
 	});
 
 	it("should throw when settings.json cannot be parsed", () => {
-		expect(() => applyWorkspaceLockIfNeeded(["src/generated"], true)).toThrow(
+		expect(() => applyWorkspaceLockIfNeeded(["packages/generated"], true)).toThrow(
 			/Falha ao bloquear o workspace/,
 		);
 	});
@@ -366,7 +366,7 @@ describe("TC-UT-LK-014: lockWorkspace merges when readonlyInclude is not an obje
 	});
 
 	it("should replace invalid readonlyInclude with generated patterns", () => {
-		applyWorkspaceLockIfNeeded(["src/generated"], true);
+		applyWorkspaceLockIfNeeded(["packages/generated"], true);
 
 		const settings = JSON.parse(
 			fs.readFileSync(
@@ -375,7 +375,7 @@ describe("TC-UT-LK-014: lockWorkspace merges when readonlyInclude is not an obje
 			),
 		);
 
-		expect(settings["files.readonlyInclude"]["src/generated/**"]).toBe(true);
+		expect(settings["files.readonlyInclude"]["packages/generated/**"]).toBe(true);
 	});
 });
 
@@ -404,7 +404,7 @@ describe("TC-UT-LK-010: isWorkspaceLocked returns false when readonlyInclude is 
 
 	it("should return false when readonlyInclude is null", () => {
 		expect(() =>
-			applyWorkspaceLockIfNeeded(["src/generated"], true),
+			applyWorkspaceLockIfNeeded(["packages/generated"], true),
 		).not.toThrow();
 	});
 });

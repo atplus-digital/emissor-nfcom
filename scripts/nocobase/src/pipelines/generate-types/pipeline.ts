@@ -22,13 +22,6 @@ import type { GenerateTypesPipelineCtx } from "./stages/fetch-schemas";
 import { fetchSchemas } from "./stages/fetch-schemas";
 import { generateContentStage } from "./stages/generate-content";
 import { writeFilesStage } from "./stages/write-files";
-import { writeReportsStage } from "./stages/write-reports";
-
-// ──────────────────────────────────────────────
-// Reports output directory
-// ──────────────────────────────────────────────
-
-const REPORTS_OUTPUT = ".reports/generate-types/report.md";
 
 // ──────────────────────────────────────────────
 // DataSource client factory (composition over NocoBaseApiClient)
@@ -100,12 +93,11 @@ type TypesStage = AsyncPipelineStage<TypesCtx>;
 export function createGenerateTypesPipeline(): RunGeneratorCliOptions<object> {
 	const outputDirs = dataSourceConfigs.map(
 		(dataSource) =>
-			`src/generated/types/${toDataSourceOutputFolder(dataSource.dataSource)}/`,
+			`packages/generated/types/${toDataSourceOutputFolder(dataSource.dataSource)}/`,
 	);
 
 	return {
 		name: "generate-types",
-		reportsOutputPath: REPORTS_OUTPUT,
 		stages: [
 			{
 				title: "📦 Generate Types",
@@ -134,7 +126,7 @@ export function createGenerateTypesPipeline(): RunGeneratorCliOptions<object> {
 							dataSourceConfigs.map((dataSource) => ({
 								title: `📦 ${dataSource.name}`,
 								task: (_listrCtx, dataSourceTask) => {
-									const outputDirRelative = `src/generated/types/${toDataSourceOutputFolder(dataSource.dataSource)}/`;
+									const outputDirRelative = `packages/generated/types/${toDataSourceOutputFolder(dataSource.dataSource)}/`;
 
 									const writeFilesToTempStage: TypesStage =
 										async function writeFilesToTempStage(stageCtx, writeTask) {
@@ -175,7 +167,6 @@ export function createGenerateTypesPipeline(): RunGeneratorCliOptions<object> {
 											buildTypes,
 											generateContentStage,
 											writeFilesToTempStage,
-											writeReportsStage,
 										],
 										dataSourceTask,
 									);
@@ -191,8 +182,6 @@ export function createGenerateTypesPipeline(): RunGeneratorCliOptions<object> {
 						task,
 						defaultConfig: {},
 						getOutputDirs: () => outputDirs,
-						label: "generate-types",
-						reportsOutputPath: REPORTS_OUTPUT,
 						stages: [executeAllDataSourcesStage],
 					});
 				},

@@ -37,7 +37,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache/
 *.tsbuildinfo
 .eslintcache
-.backup
 
 # Temp de execução dos geradores
 .temp/

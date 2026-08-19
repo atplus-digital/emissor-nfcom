@@ -1,5 +1,3 @@
-import type { PipelineReportsContext } from "@generators/lib/pipeline/reports";
-
 export interface PipelineExecutionContext<
 	TRuntimeConfig,
 	TPipelineContext = unknown,
@@ -8,7 +6,6 @@ export interface PipelineExecutionContext<
 	outputDirs: string[];
 	runtimeConfig: TRuntimeConfig;
 	overrideConfig?: Partial<TRuntimeConfig>;
-	reports: PipelineReportsContext;
 	pipelineContext?: TPipelineContext;
 	finalResult?: unknown;
 }

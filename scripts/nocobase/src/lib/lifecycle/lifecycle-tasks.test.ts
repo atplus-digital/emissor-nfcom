@@ -15,7 +15,6 @@ const originalProcess = process;
 // Mock the external dependencies that lifecycle-tasks imports from @generators paths
 // IMPORTANT: These vi.mock calls MUST be at the top level, before any imports
 mock.module("@generators/lib/io/atomic-writer", () => ({
-	backupDir: vi.fn(),
 	cleanupTempSessionDir: vi.fn(),
 	computeDiff: vi.fn(),
 	runValidation: vi.fn(),
@@ -30,34 +29,22 @@ mock.module("@generators/lib/validation/validation-options", () => ({
 	isValidationSkipped: vi.fn(() => false),
 }));
 
-mock.module("@generators/lib/pipeline/reports", () => ({
-	countReports: vi.fn(() => 0),
-	renderReportsMarkdown: vi.fn(() => "# Report\n"),
-}));
-
 // Import the mocked modules for setting up test assertions
 import {
-	backupDir,
 	cleanupTempSessionDir,
 	computeDiff,
 	runValidation,
 	swapTempToOutput,
 } from "@generators/lib/io/atomic-writer";
 import {
-	backupCurrentOutput,
 	diffTempVsOutput,
 	handleNoChanges,
 	type LifecycleCtx,
 	type LifecycleTaskParams,
-	renderReportsSummary,
+	renderDiffSummary,
 	swapTempToOutputDirs,
 	validateGeneratedOutput,
 } from "@generators/lib/lifecycle/lifecycle-tasks";
-import type { PipelineReportsContext } from "@generators/lib/pipeline/reports";
-import {
-	countReports,
-	renderReportsMarkdown,
-} from "@generators/lib/pipeline/reports";
 import { listTypeScriptFilesInDirectory } from "@generators/lib/validation/tsc-validator";
 import { isValidationSkipped } from "@generators/lib/validation/validation-options";
 import { setDiffDebug } from "@generators/lib/validation/diff-debug-options";
@@ -68,8 +55,7 @@ const WORKSPACE_ROOT = "/tmp/test-lifecycle-tasks";
 
 describe("lifecycle-tasks", () => {
 	let mockTask: Partial<TaskRunner>;
-	let mockContext: PipelineReportsContext;
-	let baseParams: LifecycleTaskParams<unknown, unknown>;
+	let baseParams: LifecycleTaskParams;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -82,11 +68,9 @@ describe("lifecycle-tasks", () => {
 
 		// Create temp directory
 		fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".backup"), { recursive: true });
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp"), { recursive: true });
 
 		// Default mocks
-		backupDir.mockReturnValue(undefined);
 		cleanupTempSessionDir.mockReturnValue(undefined);
 		computeDiff.mockReturnValue({
 			changedFiles: [],
@@ -95,36 +79,18 @@ describe("lifecycle-tasks", () => {
 		});
 		runValidation.mockResolvedValue(true);
 		swapTempToOutput.mockReturnValue(undefined);
-		countReports.mockReturnValue(0);
-		renderReportsMarkdown.mockReturnValue("# Report\n");
 
 		// Setup mock task
 		mockTask = {
 			output: "",
 		};
 
-		// Setup mock context
-		mockContext = {
-			schemaVersion: 1,
-			namespaces: {},
-		};
-
 		// Setup base params
 		baseParams = {
 			tempDir: path.join(WORKSPACE_ROOT, ".temp", "123-abc"),
-			outputDirs: ["src/generated"],
-			context: {
-				tempDir: path.join(WORKSPACE_ROOT, ".temp", "123-abc"),
-				outputDirs: ["src/generated"],
-				runtimeConfig: {},
-				reports: mockContext,
-			},
-			label: "Test Pipeline",
+			outputDirs: ["packages/generated"],
 			task: mockTask as TaskRunner,
 			cwd: WORKSPACE_ROOT,
-			timestamp: 123456,
-			randomId: "abc123",
-			onReportReady: vi.fn(),
 		};
 	});
 
@@ -143,7 +109,7 @@ describe("lifecycle-tasks", () => {
 			WORKSPACE_ROOT,
 			".temp",
 			"123-abc",
-			"src/generated",
+			"packages/generated",
 		);
 		fs.mkdirSync(tempGenerated, { recursive: true });
 		fs.writeFileSync(path.join(tempGenerated, "a.ts"), "export const a = 1;\n");
@@ -177,7 +143,7 @@ describe("lifecycle-tasks", () => {
 			WORKSPACE_ROOT,
 			".temp",
 			"123-abc",
-			"src/generated",
+			"packages/generated",
 		);
 		fs.mkdirSync(tempGenerated, { recursive: true });
 		fs.writeFileSync(path.join(tempGenerated, "a.ts"), "export const a = 1;\n");
@@ -227,7 +193,7 @@ describe("lifecycle-tasks", () => {
 			WORKSPACE_ROOT,
 			".temp",
 			"123-abc",
-			"src/generated",
+			"packages/generated",
 		);
 		fs.mkdirSync(tempGenerated, { recursive: true });
 		listTypeScriptFilesInDirectory.mockReturnValue([
@@ -277,21 +243,21 @@ describe("lifecycle-tasks", () => {
 	it("TC-UT-LIFT-004: should call computeDiff for each output directory", async () => {
 		// Arrange
 		fs.mkdirSync(
-			path.join(WORKSPACE_ROOT, ".temp", "123-abc", "src/generated"),
+			path.join(WORKSPACE_ROOT, ".temp", "123-abc", "packages/generated"),
 			{ recursive: true },
 		);
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc", "src/types"), {
 			recursive: true,
 		});
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/generated"), {
+		fs.mkdirSync(path.join(WORKSPACE_ROOT, "packages/generated"), {
 			recursive: true,
 		});
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/types"), { recursive: true });
 
 		const ctx = { hasChanges: false };
-		const params: LifecycleTaskParams<unknown, unknown> = {
+		const params: LifecycleTaskParams = {
 			...baseParams,
-			outputDirs: ["src/generated", "src/types"],
+			outputDirs: ["packages/generated", "src/types"],
 		};
 
 		computeDiff.mockReturnValue({
@@ -316,10 +282,10 @@ describe("lifecycle-tasks", () => {
 	it("TC-UT-LIFT-005: should set hasChanges to true when changed files are detected", async () => {
 		// Arrange
 		fs.mkdirSync(
-			path.join(WORKSPACE_ROOT, ".temp", "123-abc", "src/generated"),
+			path.join(WORKSPACE_ROOT, ".temp", "123-abc", "packages/generated"),
 			{ recursive: true },
 		);
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/generated"), {
+		fs.mkdirSync(path.join(WORKSPACE_ROOT, "packages/generated"), {
 			recursive: true,
 		});
 
@@ -346,10 +312,10 @@ describe("lifecycle-tasks", () => {
 	it("TC-UT-LIFT-006: should set hasChanges to true when deleted files are detected", async () => {
 		// Arrange
 		fs.mkdirSync(
-			path.join(WORKSPACE_ROOT, ".temp", "123-abc", "src/generated"),
+			path.join(WORKSPACE_ROOT, ".temp", "123-abc", "packages/generated"),
 			{ recursive: true },
 		);
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/generated"), {
+		fs.mkdirSync(path.join(WORKSPACE_ROOT, "packages/generated"), {
 			recursive: true,
 		});
 
@@ -373,7 +339,7 @@ describe("lifecycle-tasks", () => {
 	// ══════════════════════════════════════════════════════════════
 	// TC-UT-LIFT-007: handleNoChanges calls cleanupTempSessionDir
 	// ══════════════════════════════════════════════════════════════
-	it("TC-UT-LIFT-007: should call cleanupTempSessionDir and onReportReady when no changes", async () => {
+	it("TC-UT-LIFT-007: should call cleanupTempSessionDir when no changes", async () => {
 		// Arrange
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc"), {
 			recursive: true,
@@ -388,38 +354,6 @@ describe("lifecycle-tasks", () => {
 
 		// Assert
 		expect(cleanupTempSessionDir).toHaveBeenCalledWith(baseParams.tempDir);
-		expect(baseParams.onReportReady).toHaveBeenCalledWith({
-			label: baseParams.label,
-			hasChanges: false,
-			reports: baseParams.context.reports,
-		});
-	});
-
-	// ══════════════════════════════════════════════════════════════
-	// TC-UT-LIFT-008: handleNoChanges writes report markdown when reportsOutputPath is set
-	// ══════════════════════════════════════════════════════════════
-	it("TC-UT-LIFT-008: should write report markdown file when reportsOutputPath is provided", async () => {
-		// Arrange
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc"), {
-			recursive: true,
-		});
-		const ctx = { hasChanges: false, diffs: [] };
-		const reportsOutputPath = path.join(
-			WORKSPACE_ROOT,
-			"reports",
-			"pipeline-report.md",
-		);
-		const params: LifecycleTaskParams<unknown, unknown> = {
-			...baseParams,
-			reportsOutputPath,
-		};
-
-		// Act
-		await handleNoChanges(ctx as Parameters<typeof handleNoChanges>[0], params);
-
-		// Assert
-		expect(fs.existsSync(path.join(WORKSPACE_ROOT, "reports"))).toBe(true);
-		expect(fs.existsSync(reportsOutputPath)).toBe(true);
 	});
 
 	// ══════════════════════════════════════════════════════════════
@@ -453,47 +387,25 @@ describe("lifecycle-tasks", () => {
 	});
 
 	// ══════════════════════════════════════════════════════════════
-	// TC-UT-LIFT-010: backupCurrentOutput calls backupDir for each output dir
-	// ══════════════════════════════════════════════════════════════
-	it("TC-UT-LIFT-010: should call backupDir for each output directory", async () => {
-		// Arrange
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/generated"), {
-			recursive: true,
-		});
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/types"), { recursive: true });
-
-		const params: LifecycleTaskParams<unknown, unknown> = {
-			...baseParams,
-			outputDirs: ["src/generated", "src/types"],
-		};
-
-		// Act
-		await backupCurrentOutput(params);
-
-		// Assert
-		expect(backupDir).toHaveBeenCalledTimes(2);
-	});
-
-	// ══════════════════════════════════════════════════════════════
 	// TC-UT-LIFT-011: swapTempToOutputDirs calls swapTempToOutput for each output dir
 	// ══════════════════════════════════════════════════════════════
 	it("TC-UT-LIFT-011: should call swapTempToOutput for each output directory", async () => {
 		// Arrange
 		fs.mkdirSync(
-			path.join(WORKSPACE_ROOT, ".temp", "123-abc", "src/generated"),
+			path.join(WORKSPACE_ROOT, ".temp", "123-abc", "packages/generated"),
 			{ recursive: true },
 		);
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc", "src/types"), {
 			recursive: true,
 		});
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/generated"), {
+		fs.mkdirSync(path.join(WORKSPACE_ROOT, "packages/generated"), {
 			recursive: true,
 		});
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/types"), { recursive: true });
 
-		const params: LifecycleTaskParams<unknown, unknown> = {
+		const params: LifecycleTaskParams = {
 			...baseParams,
-			outputDirs: ["src/generated", "src/types"],
+			outputDirs: ["packages/generated", "src/types"],
 		};
 
 		// Act
@@ -508,11 +420,11 @@ describe("lifecycle-tasks", () => {
 	// TC-UT-LIFT-012: swapTempToOutputDirs skips non-existent temp directories
 	// ══════════════════════════════════════════════════════════════
 	it("TC-UT-LIFT-012: should skip swap for non-existent temp output directories", async () => {
-		// Arrange - temp dir exists but doesn't have the src/generated subdir
+		// Arrange - temp dir exists but doesn't have the packages/generated subdir
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc"), {
 			recursive: true,
 		});
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/generated"), {
+		fs.mkdirSync(path.join(WORKSPACE_ROOT, "packages/generated"), {
 			recursive: true,
 		});
 
@@ -525,61 +437,7 @@ describe("lifecycle-tasks", () => {
 	});
 
 	// ══════════════════════════════════════════════════════════════
-	// TC-UT-LIFT-013: renderReportsSummary calls onReportReady with correct data
-	// ══════════════════════════════════════════════════════════════
-	it("TC-UT-LIFT-013: should call onReportReady with hasChanges=true", async () => {
-		// Arrange
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc"), {
-			recursive: true,
-		});
-		const ctx = { hasChanges: true, diffs: [] };
-
-		// Act
-		await renderReportsSummary(
-			ctx as Parameters<typeof renderReportsSummary>[0],
-			baseParams,
-		);
-
-		// Assert
-		expect(baseParams.onReportReady).toHaveBeenCalledWith({
-			label: baseParams.label,
-			hasChanges: true,
-			reports: baseParams.context.reports,
-		});
-	});
-
-	// ══════════════════════════════════════════════════════════════
-	// TC-UT-LIFT-014: renderReportsSummary writes report markdown when reportsOutputPath is set
-	// ══════════════════════════════════════════════════════════════
-	it("TC-UT-LIFT-014: should write report markdown file when reportsOutputPath is provided", async () => {
-		// Arrange
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc"), {
-			recursive: true,
-		});
-		const ctx = { hasChanges: true, diffs: [] };
-		const reportsOutputPath = path.join(
-			WORKSPACE_ROOT,
-			"reports",
-			"pipeline-report.md",
-		);
-		const params: LifecycleTaskParams<unknown, unknown> = {
-			...baseParams,
-			reportsOutputPath,
-		};
-
-		// Act
-		await renderReportsSummary(
-			ctx as Parameters<typeof renderReportsSummary>[0],
-			params,
-		);
-
-		// Assert
-		expect(fs.existsSync(path.join(WORKSPACE_ROOT, "reports"))).toBe(true);
-		expect(fs.existsSync(reportsOutputPath)).toBe(true);
-	});
-
-	// ══════════════════════════════════════════════════════════════
-	// TC-UT-LIFT-015: renderReportsSummary sets task output with correct format
+	// TC-UT-LIFT-015: renderDiffSummary sets task output with correct format
 	// ══════════════════════════════════════════════════════════════
 	it("TC-UT-LIFT-015: should set task output with correct summary for changed files", async () => {
 		// Arrange
@@ -598,8 +456,8 @@ describe("lifecycle-tasks", () => {
 		};
 
 		// Act
-		await renderReportsSummary(
-			ctx as Parameters<typeof renderReportsSummary>[0],
+		await renderDiffSummary(
+			ctx as Parameters<typeof renderDiffSummary>[0],
 			baseParams,
 		);
 
@@ -616,7 +474,7 @@ describe("lifecycle-tasks", () => {
 		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc"), {
 			recursive: true,
 		});
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, "src/generated"), {
+		fs.mkdirSync(path.join(WORKSPACE_ROOT, "packages/generated"), {
 			recursive: true,
 		});
 
@@ -631,25 +489,6 @@ describe("lifecycle-tasks", () => {
 			diffs: [{ changedFiles: [], unchangedFiles: [], deletedFiles: [] }],
 		});
 		expect(computeDiff).not.toHaveBeenCalled();
-	});
-
-	it("TC-UT-LIFT-018: should skip report persistence when callbacks are absent", async () => {
-		fs.mkdirSync(path.join(WORKSPACE_ROOT, ".temp", "123-abc"), {
-			recursive: true,
-		});
-		const params: LifecycleTaskParams<unknown, unknown> = {
-			...baseParams,
-			onReportReady: undefined,
-			reportsOutputPath: undefined,
-		};
-
-		await handleNoChanges(
-			{ hasChanges: false, diffs: [] } as Parameters<typeof handleNoChanges>[0],
-			params,
-		);
-
-		expect(mockTask.output).toContain("Sem alterações");
-		expect(renderReportsMarkdown).not.toHaveBeenCalled();
 	});
 
 	it("TC-UT-LIFT-019: should summarize only unchanged files when nothing changed", async () => {
@@ -667,12 +506,12 @@ describe("lifecycle-tasks", () => {
 			],
 		};
 
-		await renderReportsSummary(
-			ctx as Parameters<typeof renderReportsSummary>[0],
+		await renderDiffSummary(
+			ctx as Parameters<typeof renderDiffSummary>[0],
 			baseParams,
 		);
 
-		expect(mockTask.output).toBe("1 inalterado(s), 0 report(s)");
+		expect(mockTask.output).toBe("1 inalterado(s)");
 	});
 
 	it("TC-UT-LIFT-016: should set task.output as a string for Listr2 renderer", async () => {
@@ -686,8 +525,8 @@ describe("lifecycle-tasks", () => {
 		};
 
 		// Act
-		await renderReportsSummary(
-			ctx as Parameters<typeof renderReportsSummary>[0],
+		await renderDiffSummary(
+			ctx as Parameters<typeof renderDiffSummary>[0],
 			baseParams,
 		);
 
@@ -716,7 +555,7 @@ describe("lifecycle-tasks", () => {
 			WORKSPACE_ROOT,
 			".temp",
 			"123-abc",
-			"src/generated",
+			"packages/generated",
 		);
 		fs.mkdirSync(tempGenerated, { recursive: true });
 		fs.writeFileSync(path.join(tempGenerated, "a.txt"), "not a ts file\n");
@@ -749,7 +588,7 @@ describe("lifecycle-tasks", () => {
 			WORKSPACE_ROOT,
 			".temp",
 			"123-abc",
-			"src/generated",
+			"packages/generated",
 		);
 		fs.mkdirSync(tempGenerated, { recursive: true });
 		fs.writeFileSync(path.join(tempGenerated, "a.ts"), "export const a = 1;\n");

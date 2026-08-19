@@ -25,15 +25,6 @@ mock.module("@generators/lib/io/locker", () => ({
 	applyWorkspaceLockIfNeeded: vi.fn(),
 }));
 
-mock.module("@generators/lib/pipeline/reports", () => ({
-	createReportsContext: vi.fn(() => ({
-		schemaVersion: 1,
-		namespaces: {},
-	})),
-	countReports: vi.fn(() => 0),
-	renderReportsMarkdown: vi.fn(() => "# Report\n"),
-}));
-
 mock.module("@generators/lib/pipeline/runner", () => ({
 	runPipelineStages: vi.fn(),
 }));
@@ -43,10 +34,9 @@ mock.module("@generators/lib/validation/validation-options", () => ({
 }));
 
 mock.module("./lifecycle-tasks", () => ({
-	backupCurrentOutput: vi.fn(),
 	diffTempVsOutput: vi.fn(),
 	handleNoChanges: vi.fn(),
-	renderReportsSummary: vi.fn(),
+	renderDiffSummary: vi.fn(),
 	swapTempToOutputDirs: vi.fn(),
 	validateGeneratedOutput: vi.fn(),
 }));
@@ -54,16 +44,14 @@ mock.module("./lifecycle-tasks", () => ({
 // Import mocked functions for assertions
 import * as fs from "node:fs";
 import { applyWorkspaceLockIfNeeded } from "@generators/lib/io/locker";
-import { createReportsContext } from "@generators/lib/pipeline/reports";
 import { runPipelineStages } from "@generators/lib/pipeline/runner";
 import { isValidationSkipped } from "@generators/lib/validation/validation-options";
 import type { TaskRunner } from "@shared/types";
 import { runStandardPipeline } from "./lifecycle";
 import {
-	backupCurrentOutput,
 	diffTempVsOutput,
 	handleNoChanges,
-	renderReportsSummary,
+	renderDiffSummary,
 	swapTempToOutputDirs,
 	validateGeneratedOutput,
 } from "./lifecycle-tasks";
@@ -74,17 +62,12 @@ describe("lifecycle", () => {
 
 		// Default mock implementations
 		applyWorkspaceLockIfNeeded.mockImplementation(() => {});
-		createReportsContext.mockReturnValue({
-			schemaVersion: 1,
-			namespaces: {},
-		});
 		runPipelineStages.mockReturnValue(undefined);
 		validateGeneratedOutput.mockResolvedValue(undefined);
 		diffTempVsOutput.mockResolvedValue(undefined);
 		handleNoChanges.mockResolvedValue(undefined);
-		backupCurrentOutput.mockResolvedValue(undefined);
 		swapTempToOutputDirs.mockResolvedValue(undefined);
-		renderReportsSummary.mockResolvedValue(undefined);
+		renderDiffSummary.mockResolvedValue(undefined);
 		fs.mkdirSync.mockImplementation(() => {});
 	});
 
@@ -101,7 +84,7 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
+			defaultConfig: { outputPath: "packages/generated" },
 			getOutputDirs: () => [],
 			stages: [],
 		};
@@ -136,8 +119,8 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -162,8 +145,8 @@ describe("lifecycle", () => {
 		expect(mockTask.newListr).toHaveBeenCalled();
 	});
 
-	// TC-UT-LIF-003: Changes detected → backup → swap → reports
-	it("TC-UT-LIF-003: should execute backup, swap, and renderReportsSummary when changes are detected", () => {
+	// TC-UT-LIF-003: Changes detected → swap → diff summary
+	it("TC-UT-LIF-003: should execute swap and renderDiffSummary when changes are detected", () => {
 		// Arrange
 		const mockTask = {
 			newListr: vi.fn().mockReturnValue({}),
@@ -178,8 +161,8 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -196,19 +179,14 @@ describe("lifecycle", () => {
 		const noChangesTask = callArgs.find((t) => t.title === "Sem alterações");
 		expect(noChangesTask?.skip).toBeDefined();
 
-		// Backup task should NOT be skipped when hasChanges is true
-		const backupTask = callArgs.find((t) => t.title === "Realizando backup");
-		expect(backupTask?.skip).toBeDefined();
-		// Verify the skip function returns false (not skipped) when hasChanges is true
-		expect(backupTask?.skip?.({ hasChanges: true })).toBe(false);
-
 		// Swap task should NOT be skipped when hasChanges is true
 		const swapTask = callArgs.find((t) => t.title === "Aplicando alterações");
 		expect(swapTask?.skip).toBeDefined();
+		expect(swapTask?.skip?.({ hasChanges: true })).toBe(false);
 	});
 
 	// TC-UT-LIF-004: No-changes scenario has correct skip logic
-	it("TC-UT-LIF-004: should skip backup and swap tasks when no changes are detected", () => {
+	it("TC-UT-LIF-004: should skip swap task when no changes are detected", () => {
 		// Arrange
 		const mockTask = {
 			newListr: vi.fn().mockReturnValue({}),
@@ -221,8 +199,8 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -239,10 +217,6 @@ describe("lifecycle", () => {
 		const noChangesTask = callArgs.find((t) => t.title === "Sem alterações");
 		expect(noChangesTask?.skip?.({ hasChanges: false })).toBe(false);
 
-		// Backup task should be skipped when hasChanges is false
-		const backupTask = callArgs.find((t) => t.title === "Realizando backup");
-		expect(backupTask?.skip?.({ hasChanges: false })).toBe("Sem alterações");
-
 		// Swap task should be skipped when hasChanges is false
 		const swapTask = callArgs.find((t) => t.title === "Aplicando alterações");
 		expect(swapTask?.skip?.({ hasChanges: false })).toBe("Sem alterações");
@@ -257,8 +231,8 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -290,8 +264,8 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -324,17 +298,16 @@ describe("lifecycle", () => {
 
 		runStandardPipeline({
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		});
 
 		const tasks = getLifecycleTasks(mockTask);
-		await runLifecycleTask(
-			tasks,
-			"Validando saída gerada",
-			{ hasChanges: true, diffs: [] },
-		);
+		await runLifecycleTask(tasks, "Validando saída gerada", {
+			hasChanges: true,
+			diffs: [],
+		});
 
 		expect(validateGeneratedOutput).toHaveBeenCalledWith(
 			expect.objectContaining({ hasChanges: true }),
@@ -351,8 +324,8 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -383,7 +356,7 @@ describe("lifecycle", () => {
 			task: mockTask as unknown as TaskRunner,
 			overrideConfig: { basePath: "/custom" },
 			defaultConfig: { basePath: "/default" },
-			getOutputDirs: () => ["src/generated"],
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -403,8 +376,8 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -427,11 +400,9 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
-			label: "Test Pipeline",
-			reportsOutputPath: "/tmp/report.md",
 		};
 
 		// Act
@@ -490,8 +461,8 @@ describe("lifecycle", () => {
 
 		const options = {
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		};
 
@@ -505,7 +476,7 @@ describe("lifecycle", () => {
 			ctx,
 		);
 		expect(applyWorkspaceLockIfNeeded).toHaveBeenCalledWith(
-			["src/generated"],
+			["packages/generated"],
 			true,
 		);
 
@@ -522,8 +493,8 @@ describe("lifecycle", () => {
 		expect(handleNoChanges).toHaveBeenCalled();
 	});
 
-	// TC-UT-LIF-012: backup, swap, and reports run when changes are detected
-	it("TC-UT-LIF-012: should run backup, swap, and report tasks when hasChanges is true", async () => {
+	// TC-UT-LIF-012: swap and diff summary run when changes are detected
+	it("TC-UT-LIF-012: should run swap and diff summary tasks when hasChanges is true", async () => {
 		const mockTask = {
 			newListr: vi.fn().mockReturnValue({}),
 		};
@@ -537,23 +508,20 @@ describe("lifecycle", () => {
 
 		runStandardPipeline({
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
-			onReportReady: vi.fn(),
 		});
 
 		const tasks = getLifecycleTasks(mockTask);
 		const ctx = { hasChanges: true, diffs: [] as unknown[] };
 
 		await runLifecycleTask(tasks, "Comparando alterações", ctx);
-		await runLifecycleTask(tasks, "Realizando backup", ctx);
 		await runLifecycleTask(tasks, "Aplicando alterações", ctx);
-		await runLifecycleTask(tasks, "Gerando relatórios", ctx);
+		await runLifecycleTask(tasks, "Resumo de alterações", ctx);
 
-		expect(backupCurrentOutput).toHaveBeenCalled();
 		expect(swapTempToOutputDirs).toHaveBeenCalled();
-		expect(renderReportsSummary).toHaveBeenCalled();
+		expect(renderDiffSummary).toHaveBeenCalled();
 	});
 
 	// TC-UT-LIF-013: empty outputDirs pipeline task invokes runPipelineStages
@@ -565,7 +533,7 @@ describe("lifecycle", () => {
 
 		runStandardPipeline({
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
+			defaultConfig: { outputPath: "packages/generated" },
 			getOutputDirs: () => [],
 			stages: [],
 		});
@@ -589,8 +557,8 @@ describe("lifecycle", () => {
 
 		runStandardPipeline({
 			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
+			defaultConfig: { outputPath: "packages/generated" },
+			getOutputDirs: () => ["packages/generated"],
 			stages: [],
 		});
 
@@ -599,28 +567,5 @@ describe("lifecycle", () => {
 		expect(noChangesTask?.skip?.({ hasChanges: true })).toBe(
 			"Sem alterações detectadas",
 		);
-	});
-
-	// TC-UT-LIF-010: onReportReady callback is passed through
-	it("TC-UT-LIF-010: should pass onReportReady callback to task params", () => {
-		// Arrange
-		const mockTask = {
-			newListr: vi.fn().mockReturnValue({}),
-		};
-		const onReportReady = vi.fn();
-
-		const options = {
-			task: mockTask as unknown as TaskRunner,
-			defaultConfig: { outputPath: "src/generated" },
-			getOutputDirs: () => ["src/generated"],
-			stages: [],
-			onReportReady,
-		};
-
-		// Act
-		runStandardPipeline(options);
-
-		// Assert
-		expect(mockTask.newListr).toHaveBeenCalled();
 	});
 });

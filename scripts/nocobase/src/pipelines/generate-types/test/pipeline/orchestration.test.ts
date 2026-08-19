@@ -44,7 +44,6 @@ mock.module("@generators/lib/lifecycle/lifecycle", () => ({
 			tempDir: "/tmp/orchestration-types",
 			outputDirs: [],
 			runtimeConfig: {},
-			reports: { schemaVersion: 1 as const, namespaces: {} },
 		};
 		for (const stage of options.stages) {
 			const listrResult = await stage(context, lifecycleTask);
@@ -80,19 +79,12 @@ mock.module(
 	}),
 );
 
-mock.module(
-	"@generators/pipelines/generate-types/stages/write-reports",
-	() => ({
-		writeReportsStage: vi.fn(async (ctx: unknown) => ctx),
-	}),
-);
-
 mock.module("../../../../config/datasources", () => ({
 	dataSourceConfigs: [
 		{
 			name: "mock-nocobase",
 			dataSource: "main",
-			outputDir: "src/generated/types/nocobase/",
+			outputDir: "packages/generated/types/nocobase/",
 			collections: ["users"],
 			splitCollections: [],
 		},
@@ -161,7 +153,10 @@ describe("generate-types pipeline orchestration", () => {
 			"https://nocobase.test/api",
 		);
 		expect(patched.runtimeConfig.outputDir).toBe(
-			path.join("/tmp/orchestration-types", "src/generated/types/nocobase/"),
+			path.join(
+				"/tmp/orchestration-types",
+				"packages/generated/types/nocobase/",
+			),
 		);
 	});
 });

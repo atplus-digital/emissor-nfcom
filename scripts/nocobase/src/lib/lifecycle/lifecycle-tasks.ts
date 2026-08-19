@@ -1,24 +1,17 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-	backupDir,
 	cleanupTempSessionDir,
 	computeDiff,
 	runValidation,
 	swapTempToOutput,
 	type ValidationTarget,
 } from "@generators/lib/io/atomic-writer";
-import {
-	countReports,
-	type PipelineReportsContext,
-	renderReportsMarkdown,
-} from "@generators/lib/pipeline/reports";
 import { writeDiffDebug } from "@generators/lib/io/diff-debug";
 import { listTypeScriptFilesInDirectory } from "@generators/lib/validation/tsc-validator";
 import { isDiffDebug } from "@generators/lib/validation/diff-debug-options";
 import { isValidationSkipped } from "@generators/lib/validation/validation-options";
 import type { TaskRunner } from "@shared/types";
-import type { PipelineExecutionContext } from "../pipeline/context";
 
 interface DiffSummary {
 	changedFiles: string[];
@@ -35,57 +28,18 @@ export interface LifecycleCtx {
 	hasChanges: boolean;
 }
 
-export interface PipelineJsonReportResult {
-	label: string;
-	hasChanges: boolean;
-	reports: PipelineReportsContext;
-}
-
 // ──────────────────────────────────────────────
 // Task parameters — collected once and passed through
 // ──────────────────────────────────────────────
 
-export interface LifecycleTaskParams<
-	TRuntimeConfig,
-	TPipelineContext = unknown,
-> {
+export interface LifecycleTaskParams {
 	tempDir: string;
 	outputDirs: string[];
-	context: PipelineExecutionContext<TRuntimeConfig, TPipelineContext>;
-	label: string;
-	reportsOutputPath?: string;
 	task: TaskRunner;
 	cwd: string;
-	timestamp: number;
-	randomId: string;
-	onReportReady?: (result: PipelineJsonReportResult) => void;
 }
 
-function persistPipelineReport(
-	params: LifecycleTaskParams<unknown, unknown>,
-	hasChanges: boolean,
-): void {
-	params.onReportReady?.({
-		label: params.label,
-		hasChanges,
-		reports: params.context.reports,
-	});
-
-	if (!params.reportsOutputPath) return;
-
-	const reportMd = renderReportsMarkdown(params.context.reports, {
-		title: `Relatório — ${params.label}`,
-	});
-	fs.mkdirSync(path.dirname(params.reportsOutputPath), {
-		recursive: true,
-	});
-	fs.writeFileSync(params.reportsOutputPath, reportMd, "utf-8");
-}
-
-function formatDiffTaskOutput(
-	diffs: DiffSummary[],
-	totalReports: number,
-): string {
+function formatDiffTaskOutput(diffs: DiffSummary[]): string {
 	const totalChanged = diffs.reduce((sum, d) => sum + d.changedFiles.length, 0);
 	const totalDeleted = diffs.reduce((sum, d) => sum + d.deletedFiles.length, 0);
 	const totalUnchanged = diffs.reduce(
@@ -97,7 +51,6 @@ function formatDiffTaskOutput(
 	if (totalChanged > 0) parts.push(`${totalChanged} alterado(s)`);
 	if (totalDeleted > 0) parts.push(`${totalDeleted} removido(s)`);
 	if (totalUnchanged > 0) parts.push(`${totalUnchanged} inalterado(s)`);
-	parts.push(`${totalReports} report(s)`);
 
 	return parts.join(", ");
 }
@@ -109,7 +62,7 @@ function formatDiffTaskOutput(
 /** Task 3 — Validate generated output (after diff, only when changes exist) */
 function collectValidationPlan(
 	ctx: LifecycleCtx,
-	params: LifecycleTaskParams<unknown, unknown>,
+	params: LifecycleTaskParams,
 ): ValidationTarget | null {
 	if (!ctx.hasChanges || !ctx.diffs) {
 		return null;
@@ -163,7 +116,7 @@ function collectValidationPlan(
 
 export async function validateGeneratedOutput(
 	ctx: LifecycleCtx,
-	params: LifecycleTaskParams<unknown, unknown>,
+	params: LifecycleTaskParams,
 ): Promise<void> {
 	if (isValidationSkipped() || !ctx.hasChanges) {
 		return;
@@ -186,7 +139,7 @@ export async function validateGeneratedOutput(
 /** Task 3 — Diff temp vs output */
 export async function diffTempVsOutput(
 	ctx: LifecycleCtx,
-	params: LifecycleTaskParams<unknown, unknown>,
+	params: LifecycleTaskParams,
 ): Promise<void> {
 	const diffs: DiffSummary[] = [];
 	let hasChanges = false;
@@ -242,44 +195,24 @@ export async function diffTempVsOutput(
 	}
 }
 
-/** Task 4 — No changes: cleanup and render reports */
+/** Task 4 — No changes: cleanup and summarize */
 export async function handleNoChanges(
 	ctx: LifecycleCtx,
-	params: LifecycleTaskParams<unknown, unknown>,
+	params: LifecycleTaskParams,
 ): Promise<void> {
 	cleanupTempSessionDir(params.tempDir);
 
-	persistPipelineReport(params, false);
-
-	const totalReports = countReports(params.context.reports);
 	const totalUnchanged = (ctx.diffs ?? []).reduce(
 		(sum, d) => sum + d.unchangedFiles.length,
 		0,
 	);
 
-	params.task.output = `Sem alterações. ${totalUnchanged} inalterado(s), ${totalReports} report(s).`;
-}
-
-/** Task 5 — Backup current output */
-export async function backupCurrentOutput(
-	params: LifecycleTaskParams<unknown, unknown>,
-): Promise<void> {
-	const backupId = `${params.timestamp}-${params.randomId}`;
-	const backupRootDir = path.join(params.cwd, ".backup", backupId);
-	for (const outputDir of params.outputDirs) {
-		const resolvedOutputDir = path.resolve(outputDir);
-		const relativeOutputDir = path.relative(params.cwd, resolvedOutputDir);
-		const backupPath = path.join(backupRootDir, relativeOutputDir);
-		fs.mkdirSync(path.dirname(backupPath), {
-			recursive: true,
-		});
-		backupDir(resolvedOutputDir, backupPath);
-	}
+	params.task.output = `Sem alterações. ${totalUnchanged} inalterado(s).`;
 }
 
 /** Task 6 — Swap temp → output */
 export async function swapTempToOutputDirs(
-	params: LifecycleTaskParams<unknown, unknown>,
+	params: LifecycleTaskParams,
 ): Promise<void> {
 	for (const outputDir of params.outputDirs) {
 		const tempOutputDir = path.join(params.tempDir, outputDir);
@@ -292,14 +225,10 @@ export async function swapTempToOutputDirs(
 	cleanupTempSessionDir(params.tempDir);
 }
 
-/** Task 7 — Render reports + summary */
-export async function renderReportsSummary(
+/** Task 7 — Render diff summary */
+export async function renderDiffSummary(
 	ctx: LifecycleCtx,
-	params: LifecycleTaskParams<unknown, unknown>,
+	params: LifecycleTaskParams,
 ): Promise<void> {
-	persistPipelineReport(params, true);
-
-	const diffs = ctx.diffs ?? [];
-	const totalReports = countReports(params.context.reports);
-	params.task.output = formatDiffTaskOutput(diffs, totalReports);
+	params.task.output = formatDiffTaskOutput(ctx.diffs ?? []);
 }

@@ -1,4 +1,4 @@
-<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-05-13 -->
+<!-- Managed by agent: keep sections and order; edit content, not structure. Last updated: 2026-08-19 -->
 <!-- Parent: ../../AGENTS.md -->
 
 # AGENTS.md — scripts/nocobase/src
@@ -21,14 +21,13 @@ src/
 ├── lib/
 │   ├── types.ts              # Shared CLI types (no Logger)
 │   ├── io/
-│   │   ├── atomic-writer.ts  # computeDiff, backupDir, swapTempToOutput, removeDir, runValidation
+│   │   ├── atomic-writer.ts  # computeDiff, swapTempToOutput, removeDir, runValidation
 │   │   └── locker.ts         # Workspace lock/unlock (merged from 4 old files)
 │   ├── lifecycle/
 │   │   ├── lifecycle.ts      # runStandardPipeline orchestration
 │   │   └── lifecycle-tasks.ts # Listr2 task wrappers
 │   ├── pipeline/
 │   │   ├── context.ts        # PipelineExecutionContext<TRuntime, TPipeline>
-│   │   ├── reports.ts        # PipelineReportsContext, addJsonReport, renderReportsMarkdown
 │   │   ├── runner.ts         # runPipelineStages, createOrchestrationRunner
 │   │   ├── orchestrator.ts   # Orchestrator runner
 │   │   └── create-script-definition.ts # Script definition factory
@@ -70,7 +69,6 @@ src/
 | CLI stderr / Listr config | `src/lib/cli/`                             |
 | Pipeline lifecycle        | `src/lib/lifecycle/lifecycle.ts`           |
 | Pipeline context type     | `src/lib/pipeline/context.ts`              |
-| Report accumulation       | `src/lib/pipeline/reports.ts`              |
 | Atomic write to .temp/    | `src/lib/io/atomic-writer.ts`              |
 | Workspace lock            | `src/lib/io/locker.ts`                     |
 | NocoBase API calls        | `src/http/nocobase-client.ts`              |
