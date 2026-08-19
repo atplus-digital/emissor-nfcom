@@ -52,8 +52,12 @@ export interface EmitirNFComResultado {
 
 export interface NFComListaItem {
 	chave: string;
-	/** Situação em uppercase do gateway (AUTORIZADA/CANCELADA/...). */
-	situacao: string;
+	/**
+	 * Situação normalizada para o domínio (lowercase) pela ACL. `null` quando o
+	 * gateway reporta um valor fora do vocabulário — o consumer simplesmente não
+	 * casa (heurística de inspeção, não caminho crítico).
+	 */
+	situacao: SituacaoNota | null;
 	protocolo: string;
 }
 

@@ -121,7 +121,7 @@ describe("portas de domínio (contrato que módulos implementam)", () => {
 		expect(resultado.situacao).toBe("autorizada");
 		const item: NFComListaItem = {
 			chave: "chave",
-			situacao: "AUTORIZADA",
+			situacao: "autorizada",
 			protocolo: "p",
 		};
 		expect(item.chave).toBe("chave");

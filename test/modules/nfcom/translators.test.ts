@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { normalizarSituacao } from "#/modules/nfcom/translators/situacao";
+import { normalizarSituacao, normalizarSituacaoLeniente } from "#/modules/nfcom/translators/situacao";
 import { montarPayloadEmitir, traduzirResultadoEmitir } from "#/modules/nfcom/translators/emitir";
 import type { EmitirNFComInput } from "#/domain/ports/nfcom.port";
 import type { Item } from "#/domain/types";
@@ -25,6 +25,17 @@ describe("normalizarSituacao", () => {
 	});
 	it("lança para situação desconhecida do gateway", () => {
 		expect(() => normalizarSituacao("DESCONHECIDA")).toThrow();
+	});
+});
+
+describe("normalizarSituacaoLeniente", () => {
+	it("mapeia como a versão estrita para valores conhecidos", () => {
+		expect(normalizarSituacaoLeniente("AUTORIZADA")).toBe("autorizada");
+		expect(normalizarSituacaoLeniente("CANCELADA")).toBe("cancelada");
+	});
+	it("retorna null para situação desconhecida (não lança — caminho /api/lista)", () => {
+		expect(normalizarSituacaoLeniente("PENDENTE")).toBeNull();
+		expect(normalizarSituacaoLeniente("")).toBeNull();
 	});
 });
 

@@ -49,7 +49,7 @@ describe("Issue #4 — duplicidade NFCom reconcilia para emitida (Falha B)", () 
 		const nfcom = nfcomFake({
 			emitirNFCom: () => Promise.reject(duplicidadeError()),
 			consultarLista: () => Promise.resolve([
-				{ chave: "ch-real", situacao: "AUTORIZADA", protocolo: "p-real" },
+				{ chave: "ch-real", situacao: "autorizada", protocolo: "p-real" },
 			]),
 		});
 		// deps.queue presente p/ capturar o webhook de emitida (C3)
@@ -114,7 +114,7 @@ describe("Issue #4 — duplicidade NFCom reconcilia para emitida (Falha B)", () 
 		const db = await mkDb();
 		const nfcom = nfcomFake({
 			emitirNFCom: () => Promise.reject(new Error("NFCom HTTP 500: Falha no schema XML")),
-			consultarLista: () => Promise.resolve([{ chave: "x", situacao: "AUTORIZADA", protocolo: "p" }]),
+			consultarLista: () => Promise.resolve([{ chave: "x", situacao: "autorizada", protocolo: "p" }]),
 		});
 
 		const res = await handleEmitNfcom(

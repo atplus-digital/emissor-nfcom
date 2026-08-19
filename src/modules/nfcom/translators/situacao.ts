@@ -14,14 +14,22 @@ const MAPA: Record<string, SituacaoNota> = {
 	rejeitada: "rejeitada",
 };
 
-/** Normaliza a situação do gateway (uppercase) para SituacaoNota (lowercase). */
+/** Normaliza a situação do gateway (uppercase) para SituacaoNota (lowercase).
+ * Lança para situação desconhecida — usado no caminho de emissão, onde a
+ * resposta é do nosso POST e o valor é esperado. */
 export function normalizarSituacao(situacao: string): SituacaoNota {
-	const chave = situacao.trim().toLowerCase();
-	const mapeada = MAPA[chave];
+	const mapeada = MAPA[situacao.trim().toLowerCase()];
 	if (!mapeada) {
 		throw new Error(
-			`Situação desconhecida do gateway NFCom: "${situacao}" (normalizada: "${chave}")`,
+			`Situação desconhecida do gateway NFCom: "${situacao}" (normalizada: "${situacao.trim().toLowerCase()}")`,
 		);
 	}
 	return mapeada;
+}
+
+/** Variação leniente: retorna `null` para situação desconhecida em vez de
+ * lançar. Usada no `/api/lista` (heurística de inspeção) — um valor inesperado
+ * do gateway não deve derrubar a reconciliação, apenas não casar. */
+export function normalizarSituacaoLeniente(situacao: string): SituacaoNota | null {
+	return MAPA[situacao.trim().toLowerCase()] ?? null;
 }

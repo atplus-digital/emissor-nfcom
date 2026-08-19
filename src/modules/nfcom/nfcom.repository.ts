@@ -15,6 +15,7 @@ import type {
 import { log } from "#/lib/logger";
 import type { NfcomClient, NfcomApiError } from "./nfcom.client";
 import { montarPayloadEmitir, traduzirResultadoEmitir } from "./translators/emitir";
+import { normalizarSituacaoLeniente } from "./translators/situacao";
 
 /** TTL de 12h em ms (cache do token do gateway — ADR-0001). */
 const TTL_12H_MS = 12 * 60 * 60 * 1000;
@@ -104,7 +105,7 @@ export function criarNfcomRepository(
 			const itens = await client.consultaLista(token, cpfcnpj, inicio, fim);
 			return itens.map<NFComListaItem>((i) => ({
 				chave: i.chave,
-				situacao: i.situacao,
+				situacao: normalizarSituacaoLeniente(i.situacao),
 				protocolo: i.protocolo,
 			}));
 		},

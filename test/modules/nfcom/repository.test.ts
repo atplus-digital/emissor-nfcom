@@ -166,13 +166,25 @@ describe("nfcom.repository — emitirNFCom", () => {
 });
 
 describe("nfcom.repository — consultarLista", () => {
-	it("retorna itens preservando situacao em uppercase", async () => {
+	it("retorna itens com situacao normalizada p/ domínio (lowercase)", async () => {
 		const { client } = fakeClient();
 		const repo = makeRepo(client, { ttlMs: 99_999 });
 		const itens = await repo.consultarLista("11122233344", "2026-08-01", "2026-08-31");
 		expect(itens).toHaveLength(1);
-		expect(itens[0].situacao).toBe("AUTORIZADA");
+		expect(itens[0].situacao).toBe("autorizada");
 		expect(itens[0].chave).toBe("c1");
+	});
+
+	it("situacao desconhecida do gateway → null (leniente, não lança)", async () => {
+		const { client } = fakeClient({
+			consultaLista: mock(async () => [
+				{ chave: "c2", situacao: "PENDENTE", protocolo: "p2" },
+			]),
+		});
+		const repo = makeRepo(client, { ttlMs: 99_999 });
+		const itens = await repo.consultarLista("11122233344", "2026-08-01", "2026-08-31");
+		expect(itens).toHaveLength(1);
+		expect(itens[0].situacao).toBeNull();
 	});
 
 	it("usa token em cache (não refaz auth)", async () => {

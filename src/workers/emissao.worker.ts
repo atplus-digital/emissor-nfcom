@@ -273,7 +273,7 @@ async function buscarNotaAutorizada(
 ): Promise<{ chave: string; protocolo: string } | null> {
 	const { inicio, fim } = janelaInspecao();
 	const itens = await deps.nfcom.consultarLista(mascararDoc(d.destinatario.cpfcnpj), inicio, fim);
-	const aut = itens.find((i) => /autorizada/i.test(i.situacao));
+	const aut = itens.find((i) => i.situacao === "autorizada");
 	return aut ? { chave: aut.chave, protocolo: aut.protocolo } : null;
 }
 
