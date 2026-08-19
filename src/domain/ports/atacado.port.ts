@@ -98,6 +98,18 @@ export interface RegistrarErroInput {
 	statusCode?: string;
 }
 
+/** Erro de emissão registrado (`t_nfcom_erros`) — leitura p/ inspeção (SPEC-0001). */
+export interface ErroEmissao {
+	id: number;
+	/** Cobrança de origem (erro de boleto) — ausente quando é erro de nota. */
+	cobrancaId?: number;
+	/** Nota de origem (erro de emissão NFCom) — ausente quando é erro de cobrança. */
+	notaId?: number;
+	erro: string;
+	mensagem: string;
+	statusCode?: string;
+}
+
 export interface AtacadoPort {
 	// Leitura (fonte de domínio)
 	buscarParceiroPorId(parceiroId: number): Promise<Parceiro | null>;
@@ -112,6 +124,16 @@ export interface AtacadoPort {
 	 * Retorna `null` quando o id não existe (404 do Atacado).
 	 */
 	getFaturaPorId(id: number): Promise<Fatura | null>;
+	/**
+	 * Erros de emissão de uma fatura (leitura p/ `GET /emissao`, SPEC-0001).
+	 * Filtra `t_nfcom_erros` pelos ids de cobrança/nota da fatura — a tabela
+	 * não tem FK direta de fatura, então os ids são resolvidos pelo caller.
+	 * `[]` quando não há ids (fatura sem cobranças/notas) ou erros.
+	 */
+	buscarErrosPorFatura(
+		cobrancaIds: number[],
+		notaIds: number[],
+	): Promise<ErroEmissao[]>;
 
 	// Criação da árvore (direta, com rollback manual — SPEC-0002)
 	criarFatura(input: CriarFaturaInput): Promise<{ id: number }>;

@@ -348,3 +348,55 @@ describe("AtacadoRepository > buscarFaturaPorChave", () => {
 		expect(f).toBeNull();
 	});
 });
+
+describe("AtacadoRepository > buscarErrosPorFatura", () => {
+	it("filtra t_nfcom_erros por $or de ids de cobrança/nota e mapeia p/ domínio", async () => {
+		const { client, calls } = mockClient({
+			list: async () => [
+				{
+					id: 1,
+					f_fk_cobranca: 456,
+					f_fk_nfcom: 0,
+					f_erro: "BOLETO",
+					f_mensagem: "customer inválido",
+					f_status_code: "",
+				},
+				{
+					id: 2,
+					f_fk_cobranca: 0,
+					f_fk_nfcom: 7,
+					f_erro: "NFCOM",
+					f_mensagem: "Duplicidade",
+					f_status_code: "500",
+				},
+			],
+		});
+		const repo = new AtacadoRepository(client);
+		const erros = await repo.buscarErrosPorFatura([456], [7]);
+		expect(erros).toEqual([
+			{ id: 1, cobrancaId: 456, notaId: undefined, erro: "BOLETO", mensagem: "customer inválido", statusCode: undefined },
+			{ id: 2, cobrancaId: undefined, notaId: 7, erro: "NFCOM", mensagem: "Duplicidade", statusCode: "500" },
+		]);
+		expect(calls.list[0][0]).toBe("t_nfcom_erros");
+		expect(calls.list[0][1]).toEqual({
+			filter: { "$or": [{ f_fk_cobranca: 456 }, { f_fk_nfcom: 7 }] },
+		});
+	});
+
+	it("sem ids → [] sem chamar o client", async () => {
+		const { client, calls } = mockClient();
+		const repo = new AtacadoRepository(client);
+		expect(await repo.buscarErrosPorFatura([], [])).toEqual([]);
+		expect(calls.list).toBeUndefined();
+	});
+
+	it("404 → [] (padrão de list do NocoBase)", async () => {
+		const { client } = mockClient({
+			list: async () => {
+				throw new AtacadoError("Atacado 404", 404, "not found");
+			},
+		});
+		const repo = new AtacadoRepository(client);
+		expect(await repo.buscarErrosPorFatura([456], [])).toEqual([]);
+	});
+});

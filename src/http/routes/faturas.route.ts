@@ -16,7 +16,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { documentoValido } from "#/domain/fatura/validacao";
 import type { Fatura } from "#/domain/types";
-import type { AtacadoPort } from "#/domain/ports/atacado.port";
+import type { AtacadoPort, ErroEmissao } from "#/domain/ports/atacado.port";
 import type { QueuePort } from "#/domain/ports/queue.port";
 import type { DefaultsFiscais } from "#/domain/fatura/defaults-fiscais";
 import {
@@ -139,7 +139,12 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 			const { corpo, status } = erroResponse(TipoErro.NAO_ENCONTRADO, "Fatura não encontrada");
 			return c.json(corpo, status as ContentfulStatusCode);
 		}
-		return c.json(serializarEmissao(fatura), 200);
+		// Erros de emissão da fatura (SPEC-0001 passo 7) — resolvidos pelos ids de
+		// cobrança/nota (t_nfcom_erros não tem FK direta de fatura).
+		const cobrancaIds = fatura.cobrancas.map((cb) => cb.id).filter((n): n is number => n != null);
+		const notaIds = fatura.cobrancas.flatMap((cb) => cb.notas.map((n) => n.id)).filter((n): n is number => n != null);
+		const erros = await atacado.buscarErrosPorFatura(cobrancaIds, notaIds);
+		return c.json(serializarEmissao(fatura, erros), 200);
 	});
 
 	return app;
@@ -158,8 +163,36 @@ async function carregarFatura(atacado: AtacadoPort, id: number): Promise<Fatura 
 	return atacado.getFaturaPorId(id);
 }
 
+/** Resposta de `GET /faturas/:id/emissao` (SPEC-0001 passo 7). */
+interface EmissaoNota {
+	id?: number;
+	situacao?: string;
+	chave?: string;
+	protocolo?: string;
+}
+interface EmissaoCobranca {
+	id?: number;
+	status: string;
+	boletoUrl?: string;
+	notas: EmissaoNota[];
+}
+interface EmissaoErro {
+	id: number;
+	cobrancaId?: number;
+	notaId?: number;
+	erro: string;
+	mensagem: string;
+	statusCode?: string;
+}
+interface EmissaoResponse {
+	faturaId?: number;
+	status: string;
+	cobrancas: EmissaoCobranca[];
+	erros: EmissaoErro[];
+}
+
 /** Serializa o estado de emissão (GET /emissao). */
-function serializarEmissao(fatura: Fatura): unknown {
+function serializarEmissao(fatura: Fatura, erros: ErroEmissao[]): EmissaoResponse {
 	return {
 		faturaId: fatura.id,
 		status: fatura.status,
@@ -174,9 +207,13 @@ function serializarEmissao(fatura: Fatura): unknown {
 				protocolo: n.protocolo,
 			})),
 		})),
-		// TODO(m10): erros viriam de t_nfcom_erros via AtacadoPort.buscarErros —
-		// fora do escopo deste ciclo (porta não expõe leitura de erros). Mantido
-		// `erros: []`; quando AtacadoPort ganhar `buscarErros(faturaId)`, preencher.
-		erros: [],
+		erros: erros.map((e) => ({
+			id: e.id,
+			cobrancaId: e.cobrancaId,
+			notaId: e.notaId,
+			erro: e.erro,
+			mensagem: e.mensagem,
+			statusCode: e.statusCode,
+		})),
 	};
 }

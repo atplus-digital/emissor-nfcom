@@ -22,12 +22,14 @@ import type {
 	CriarFaturaInput,
 	CriarItemInput,
 	CriarNotaInput,
+	ErroEmissao,
 	RegistrarErroInput,
 } from "#/domain/ports/atacado.port";
 import type { Cliente, Fatura, Parceiro, Plano } from "#/domain/types";
 import type { AtacadoClient } from "./atacado.client";
 import { AtacadoError } from "./atacado.client";
 import { clienteToDomain, type ClienteExterno } from "./translators/cliente";
+import { erroToDomain, type ErroExterna } from "./translators/erros";
 import {
 	cobrancaToCreate,
 	cobrancaToDomain,
@@ -119,6 +121,30 @@ export class AtacadoRepository implements AtacadoPort {
 			// 404 = fatura não encontrada → null (a rota vira 404, POST /emitir).
 			// Outros erros (5xx, etc.) propagam — são retryable/fatal no worker.
 			if (err instanceof AtacadoError && err.statusCode === 404) return null;
+			throw err;
+		}
+	}
+
+	async buscarErrosPorFatura(
+		cobrancaIds: number[],
+		notaIds: number[],
+	): Promise<ErroEmissao[]> {
+		const idsCobranca = cobrancaIds.filter((n) => n > 0);
+		const idsNota = notaIds.filter((n) => n > 0);
+		if (idsCobranca.length === 0 && idsNota.length === 0) return [];
+		// `t_nfcom_erros` não tem FK de fatura — filtra pelos ids de cobrança/nota.
+		// Usa `$or` com igualdades por id (operador simples, sem `$in` sem precedente).
+		const clauses: Array<Record<string, unknown>> = [];
+		for (const id of idsCobranca) clauses.push({ f_fk_cobranca: id });
+		for (const id of idsNota) clauses.push({ f_fk_nfcom: id });
+		try {
+			const rows = await this.client.list(COL.erros, {
+				filter: { "$or": clauses },
+			});
+			return (rows as ErroExterna[]).map(erroToDomain);
+		} catch (err) {
+			// 404 em `list` → sem erros (idem buscarClientesAtivosPorParceiro).
+			if (err instanceof AtacadoError && err.statusCode === 404) return [];
 			throw err;
 		}
 	}

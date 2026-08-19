@@ -72,6 +72,7 @@ export function fakeAtacado(over: Partial<AtacadoPort> = {}): AtacadoPort {
 		buscarPlanosDeServico: async () => [planoFixture()],
 		buscarFaturaPorChave: async () => null,
 		getFaturaPorId: async () => null,
+		buscarErrosPorFatura: async () => [],
 		criarFatura: async () => ({ id: 101 }),
 		criarCobranca: async () => ({ id: 456 }),
 		criarNota: async () => ({ id: 7 }),
