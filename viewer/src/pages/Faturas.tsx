@@ -187,6 +187,7 @@ export function Faturas() {
 						</tbody>
 					</table>
 				</div>
+			)}
 
 			{totalPaginas > 1 && (
 				<div className="pagination">
