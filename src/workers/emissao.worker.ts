@@ -29,10 +29,11 @@ import {
 	resolveKey,
 	type IdempotencyAcquire,
 } from "#/lib/db/idempotency";
+import { WaitingChildrenError } from "bullmq";
 import { acquireLease, reassumirLeaseSeStale, releaseLease } from "#/lib/db/lease";
 import { enqueueOutbox } from "#/lib/db/outbox";
 import { mapearSituacaoNota } from "#/domain/emissao/situacao";
-import { consolidarFatura, hojeEmSP, type ResultadoCobranca } from "#/domain/emissao/consolidacao";
+import { consolidarFatura, hojeEmSP, resultadosDaFatura, type ResultadoCobranca } from "#/domain/emissao/consolidacao";
 import { mascararDoc } from "#/domain/fatura/cpf-cnpj";
 import { runWithLogContext, log } from "#/lib/logger";
 import type { AtacadoPort } from "#/domain/ports/atacado.port";
@@ -130,12 +131,47 @@ export interface EmitNfcomData {
 	total: number;
 }
 
+/**
+ * Shape mínimo dos dependencies de um job no Flow (shape do
+ * `job.getDependencies()` do BullMQ 6.x, sem os cursors de paginação).
+ * - `processed`: child key → `returnvalue` (SÓ children COMPLETADOS — o hash
+ *   é gravado pelo `moveToFinished` no caminho de sucesso);
+ * - `unprocessed`: children ainda pendentes (não terminaram);
+ * - `failed`: ids dos children que terminaram em falha (exaustos).
+ *
+ * Nota (A1): um child que falha/exaure NÃO produz `returnvalue` (o
+ * `moveToFinished` failed só registra nos sets `:unsuccessful`/`:failed`),
+ * então "values ausentes + `unprocessed` vazio + `failed` não vazio" = todos
+ * os children terminaram com falha → consolidação pelo estado real (A2).
+ */
+export interface DependenciesLike {
+	processed?: Record<string, unknown>;
+	unprocessed?: string[];
+	failed?: string[];
+	ignored?: Record<string, unknown>;
+}
+
 /** Job-like object mínimo (compatível c/ BullMQ Job p/ testes). */
 export interface JobLike<T = unknown> {
 	data: T;
 	attemptsMade: number;
 	opts: { attempts?: number };
 	id?: string;
+	/**
+	 * Dependências do job na árvore do Flow (`job.getDependencies()` do BullMQ —
+	 * o real job tem o método; o stub de teste implementa opcionalmente). Base da
+	 * decisão 1ª vs 2ª passada (A1): na 1ª passada legítima ainda não há children
+	 * registrados (shape vazio); após o fan-out, o parent reentra SEMPRE com
+	 * children visíveis. A visibilidade dos `childrenValues` é secundária.
+	 */
+	getDependencies?: () => Promise<DependenciesLike>;
+	/**
+	 * Move o job p/ `waiting-children` (BullMQ). `true` = havia children
+	 * pendentes e o job foi estacionado (chamar lança `WaitingChildrenError`
+	 * p/ o worker não contar como falha); `false` = todos os children já
+	 * terminaram (consolida). Token do lock do worker (2º arg do processor).
+	 */
+	moveToWaitingChildren?: (token: string) => Promise<boolean>;
 }
 
 /**
@@ -242,6 +278,19 @@ function ehDuplicidadeNFCom(err: unknown): boolean {
 }
 
 /**
+ * Extrai o número da nota (nNF) da chave de acesso de 44 dígitos (spec NFe:
+ * os dígitos 26-34, 9 posições). Fallback para o caminho de reconciliação de
+ * duplicidade — onde o gateway `/api/lista` devolve só chave/protocolo (sem
+ * número) — e como salvaguarda no caminho feliz se `res.numero` vier vazio.
+ * Chave ausente/malformada → `undefined` (não assume valor).
+ */
+export function numeroDaChave(chave: string | undefined): number | undefined {
+	if (!chave || chave.length < 44) return undefined;
+	const n = Number(chave.substring(25, 34));
+	return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * Janela de datas para a inspeção em `/api/lista` (ISO UTC, `YYYY-MM-DD`).
  * SEFAZ pode ter latência curta entre autorizar e indexar na lista — usa hoje
  * ±1 dia. Derivado de `hojeEmSP()` (fuso do domínio America/Sao_Paulo, M9) —
@@ -289,9 +338,10 @@ export interface ResultadoEmitFatura {
  * Parent: adquire lease, marca `emitindo`, fan-out cobranças. O callback de
  * consolidação roda quando toda a árvore resolve (segunda passada no wiring).
  *
- * Caso M3: se 0 cobranças a-emitir (todas já emitidas, ou assassinadas), não há
- * children → não há segunda passada → o lease ficaria preso. Consolida `emitida`
- * imediatamente e libera o lease aqui, retornando `{enfileiradas: 0}`.
+ * Caso M3/A3: se 0 cobranças a-emitir (todas já emitidas, em erro, ou
+ * assassinadas), não há children → não há segunda passada → o lease ficaria
+ * preso. Consolida pelo ESTADO REAL das cobranças (`consolidar(resultadosDaFatura)`
+ * — `emitida`/`parcial`/`erro`, não hardcoded) e libera o lease aqui.
  *
  * `ErroFatal` (fatura não encontrada) libera o lease via catch (m1) — ainda não há
  * children para drenar a consolidação.
@@ -314,6 +364,14 @@ export async function handleEmitFatura(
 			const limite = deps.limiteLeaseStaleMs ?? 3 * 60 * 1000;
 			const reassumido = await reassumirLeaseSeStale(db, faturaId, limite);
 			if (!reassumido) {
+				// A4 (defesa em profundidade): em RE-ENTRADA (attemptsMade > 0) o "pular"
+				// silencioso era o Defeito A — o job resolvia com children pendentes, o
+				// `moveToFinished` lançava JobPendingChildren e queimava a tentativa.
+				// Com A1 bem feito este caminho raramente aciona; quando aciona em
+				// re-entrada, o certo é RE-ATIVAR (backoff) até o lease virar stale.
+				if (job.attemptsMade > 0) {
+					throw new ErroRetryable("lease de outrem em re-entrada — aguardando (stale)");
+				}
 				log.warn({ faturaId }, "fatura com lease ativo — outro job detém; pulando");
 				return { enfileiradas: 0 };
 			}
@@ -344,21 +402,14 @@ export async function handleEmitFatura(
 			// fan-out cobranças a-emitir
 			const cobrancasAEmitir = fatura.cobrancas.filter((c) => c.status === "a-emitir");
 			if (cobrancasAEmitir.length === 0) {
-				// M3: todas já emitidas → sem children → consolida `emitida` agora e
-				// libera o lease (não haverá segunda passada para fazê-lo).
-				log.info({ faturaId }, "0 cobranças a-emitir — consolidando emitida imediatamente (M3)");
-				await enqueueOutbox(db, {
-					aggregate: "fatura",
-					aggregateId: faturaId,
-					payload: { op: "atualizarStatusFatura", id: faturaId, status: "emitida" },
-				});
-				await enfileirarEventoWebhook(deps, {
-					faturaId,
-					tipo: "fatura.status",
-					alvo: { faturaId },
-					estado: "emitida",
-				});
-				await releaseLease(db, faturaId);
+				// M3 (A3): sem cobranças a-emitir → sem children → não haverá 2ª passada
+				// para consolidar. Deriva o status FINAL dos status REAIS das cobranças
+				// (não hardcode `emitida` — uma cobrança em `erro` também não é a-emitir)
+				// e libera o lease aqui. É também a porta do self-healing na re-emissão
+				// de uma fatura já processada.
+				const status = consolidar(resultadosDaFatura(fatura));
+				log.info({ faturaId, status }, "0 cobranças a-emitir — consolidando pelo estado real (M3/A3)");
+				await consolidarFaturaEliberar(db, deps, faturaId, status);
 				return { enfileiradas: 0 };
 			}
 			const enqueue = deps.enqueueFilho ?? (async () => {});
@@ -714,7 +765,9 @@ export async function handleEmitNfcom(
 					id: d.notaId,
 					statusInterno: map.statusInterno,
 					situacao: map.situacao,
-					numero: res.numero,
+					// Fallback defensivo: se o gateway não devolveu número, deriva
+					// da chave (dígitos 26-34) em vez de deixar `f_numero` vazio.
+					numero: res.numero ?? numeroDaChave(res.chave),
 					serie: res.serie,
 					chave: res.chave,
 					protocolo: res.protocolo,
@@ -765,6 +818,10 @@ export async function handleEmitNfcom(
 							situacao: "autorizada",
 							chave: encontrada.chave,
 							protocolo: encontrada.protocolo,
+						// O `/api/lista` não devolve número/série — deriva o
+						// nNF da chave (dígitos 26-34) p/ não deixar `f_numero`
+						// vazio na reconciliação de duplicidade.
+						numero: numeroDaChave(encontrada.chave),
 						},
 					});
 					await webhookNota("emitida");
@@ -792,6 +849,209 @@ export async function handleEmitNfcom(
 
 export function consolidar(resultados: ResultadoCobranca[]): StatusFatura {
 	return consolidarFatura(resultados).status;
+}
+
+// ============================================================
+// Decisão 1ª vs 2ª passada (A1)
+// ============================================================
+
+/**
+ * Decisão 1ª vs 2ª passada (A1) — pelo nº de children, não só pela
+ * visibilidade dos values. O defeito que este substitui: a reentrada do
+ * parent quando os `childrenValues` ainda não estavam visíveis caía no
+ * fan-out, `acquireLease` falhava (lease da 1ª passada do PRÓPRIO job), o
+ * handler "pula" retornando normalmente → BullMQ tenta `moveToFinished`
+ * com children pendentes → `JobPendingChildren` queima a tentativa 5x →
+ * fatura órfã em `emitindo` + re-fan-out duplicado das notas.
+ *
+ * - sem children registrados → 1ª passada legítima (fan-out). Na 1ª passada
+ *   o parent ainda não tem children (o fan-out os registra); após o fan-out
+ *   o BullMQ coloca o parent em `waiting-children` e só o reativa quando
+ *   todos terminam — então "com children" implica reentrada.
+ * - com children + values visíveis → 2ª passada (consolida — caminho M1).
+ * - com children + values ausentes + algum child ainda pendente
+ *   (`unprocessed` não vazio) → "aguardar": o dispatch lança `ErroRetryable`
+ *   (NUNCA retorna normalmente) — o backoff exponencial dá tempo p/ os
+ *   children terminarem e os values persistirem; o BullMQ reativa o job.
+ * - com children + values ausentes + todos terminados (failed/exaustos) →
+ *   exaustos não produzem `returnvalue` → consolidação pelo ESTADO REAL (A2).
+ *
+ * Sem `getDependencies` (stub de teste antigo) preserva o comportamento
+ * antigo: values visíveis → consolida; senão → fan-out (1ª passada).
+ */
+export async function decidirPassadaEmissao(
+	job: JobLike,
+	childrenValues: Record<string, unknown> | undefined,
+): Promise<"primeira" | "segunda" | "aguardar" | "exaustas"> {
+	const deps = job.getDependencies ? await job.getDependencies() : undefined;
+	const temChildren =
+		(deps?.processed && Object.keys(deps.processed).length > 0) ||
+		(deps?.unprocessed?.length ?? 0) > 0 ||
+		(deps?.failed?.length ?? 0) > 0;
+	if (!temChildren) return "primeira";
+	if (childrenValues && Object.keys(childrenValues).length > 0) return "segunda";
+	// values ausentes com children registrados: algum child ainda pendente?
+	if ((deps?.unprocessed?.length ?? 0) > 0) return "aguardar";
+	// todos terminados sem returnvalue (failed/exaustos) → estado real (A2).
+	return "exaustas";
+}
+
+// ============================================================
+// Dispatch do worker (decisão por jobName — testável SEM Redis)
+// ============================================================
+
+/**
+ * Vista do job BullMQ usada pelo dispatch (camada fina do wiring + testes):
+ * o worker real (`job` do BullMQ) satisfaz este shape por cast; os testes
+ * passam stubs.
+ */
+export interface WorkerCtx {
+	jobName: string;
+	jobId: string;
+	job: JobLike;
+	getChildrenValues: <T>() => Promise<Record<string, T> | undefined>;
+	/** Fan-out: enfileira um child com ESTE job como parent (per-job). */
+	enqueueFilho: (name: string, data: unknown) => Promise<void>;
+	/**
+	 * Token do lock do worker (2º arg do processor do BullMQ). Necessário p/
+	 * `job.moveToWaitingChildren(token)` — estacionar o parent em
+	 * `waiting-children` sem custo de attempt enquanto os children rodam.
+	 */
+	token: string;
+}
+
+/**
+ * Lê os `returnvalue`s dos children via `ctx.getChildrenValues`, com retry
+ * curto. Race BullMQ (C4): o parent é reativado quando os children
+ * completam, mas o `returnvalue` final do child pode não estar visível no
+ * instante exato do reprocessamento (child faz 2 passadas; o valor final só
+ * persiste ao fim). Retry curto (até ~500ms) resolve sem custo perceptível
+ * quando os valores já estão disponíveis.
+ */
+async function getChildrenValuesComRetry<T>(
+	ctx: WorkerCtx,
+	retries = 10,
+	delayMs = 50,
+): Promise<Record<string, T> | undefined> {
+	for (let i = 0; i < retries; i++) {
+		const cv = await ctx.getChildrenValues<T>();
+		if (cv && Object.keys(cv).length > 0) return cv;
+		await new Promise((r) => setTimeout(r, delayMs));
+	}
+	return ctx.getChildrenValues<T>();
+}
+
+/**
+ * Estaciona o parent em `waiting-children` (sem custo de attempt — idiom
+ * BullMQ p/ "pai espera children"). Retorna:
+ * - `false` se `moveToWaitingChildren` moveu o job (havia children pendentes):
+ *   lança `WaitingChildrenError`, que o worker trata como "aguardar" (não
+ *   conta como falha); o BullMQ reativa o parent quando os children
+ *   terminam. A exceção é lançada aqui p/ o dispatch não retornar normalmente.
+ * - `true` se NÃO havia pendentes (todos os children já terminaram, mas os
+ *   `childrenValues` ainda não estavam visíveis no retry curto): o caller
+ *   consolida pelo estado real (A2).
+ *
+ * `moveToWaitingChildren` ausente (stub de teste sem Redis) → fallback:
+ * lança `WaitingChildrenError` (assume pendente) p/ preservar o comportamento
+ * de "não retornar normalmente com children pendentes".
+ */
+async function estacionarOuPronto(ctx: WorkerCtx): Promise<boolean> {
+	// `ctx.job` é o Job real do BullMQ (cast `as unknown as JobLike` preserva o
+	// objeto — tem `backend`/`queue`). Chamado como MÉTODO (`ctx.job.moveToWaitingChildren?.(token)`)
+	// p/ não perder o `this` (desestruturar em variável desvincula e `this.backend`
+	// fica undefined — bug que travava a fatura em `emitindo`).
+	if (!ctx.job.moveToWaitingChildren) {
+		// Sem BullMQ real (teste): estaciona (assume pendente).
+		throw new WaitingChildrenError();
+	}
+	const shouldWait = await ctx.job.moveToWaitingChildren(ctx.token);
+	if (shouldWait) {
+		// Havia pendentes — estaciona.
+		throw new WaitingChildrenError();
+	}
+	// Todos terminaram (values ainda não visíveis no retry) — pronto p/ A2.
+	return true;
+}
+
+/**
+ * Dispatch do worker de emissão por `jobName` (o "cérebro" da camada fina do
+ * wiring). Puro em Redis: `getChildrenValues`/`enqueueFilho` vêm por `ctx`,
+ * então as 4 células do A1 (1ª passada / 2ª passada / aguardar / exaustas)
+ * são testáveis com stubs — o wiring em `criarEmissaoWorker` só liga o job
+ * real do BullMQ a este dispatch.
+ */
+export async function processarJobEmissao(ctx: WorkerCtx, deps: EmissaoDeps): Promise<unknown> {
+	const { jobName, job } = ctx;
+	if (jobName === "emit-fatura") {
+		// A1: a decisão 1ª vs 2ª passada é pelo nº de children registrados
+		// (`job.getDependencies()`), não só pela visibilidade dos values — a
+		// reentrada sem childrenValues visíveis NÃO pode mais cair no fan-out
+		// (que "pula" o lease e queima a tentativa via `moveToFinished` com
+		// children pendentes — o Defeito A).
+		const childrenValues = await getChildrenValuesComRetry<ResultadoEmitCobranca>(ctx);
+		const passada = await decidirPassadaEmissao(job, childrenValues);
+		if (passada === "aguardar") {
+			// Children em andamento: estaciona o parent em `waiting-children`
+			// (sem custo de attempt — o BullMQ reativa quando os children
+			// terminam). `moveToWaitingChildren` retorna `true` se havia
+			// pendentes (lança `WaitingChildrenError`, que o worker trata como
+			// "aguardar", NÃO como falha) ou `false` se todos já terminaram (os
+			// values ainda não estavam visíveis no retry curto — consolida
+			// pelo estado real, A2).
+			if (await estacionarOuPronto(ctx)) return consolidarFaturaPorEstado(job as JobLike<EmitFaturaData>, deps);
+		}
+		if (passada === "segunda") {
+			return consolidarFaturaOuCobranca(job as unknown as { data: EmitFaturaData }, childrenValues!, deps);
+		}
+		if (passada === "exaustas") {
+			// Children terminados sem returnvalue (failed/exaustos) → consolida
+			// pelo estado REAL da fatura (A2).
+			return consolidarFaturaPorEstado(job as JobLike<EmitFaturaData>, deps);
+		}
+		// Primeira passada: fan-out. O parent é resolvido **por job** (closure
+		// no ctx, não Map global) — seguro p/ concurrency>1 (ADR-0002).
+		const res = await handleEmitFatura(job as JobLike<EmitFaturaData>, { ...deps, enqueueFilho: ctx.enqueueFilho });
+		// Fan-out enfileirou children → o parent NÃO pode retornar normalmente
+		// (BullMQ rejeitaria `moveToCompleted` com -4 JobPendingChildren →
+		// queimaria attempts). Estaciona em `waiting-children`: o BullMQ reativa
+		// o parent quando todos os children terminarem (2ª passada consolida).
+		// `res.enfileiradas === 0` = M3 (consolidou agora, sem children) → retorna.
+		if (res.enfileiradas > 0) await estacionarOuPronto(ctx);
+		return res;
+	}
+	if (jobName === "emit-cobranca") {
+		// emit-cobranca tem 2 passadas (M1), igual o parent: 1ª fan-out das
+		// notas; 2ª (após notas completarem) coleta os ResultadoEmitNfcom e
+		// devolve o ResultadoEmitCobranca final com notasOk[] reais.
+		const childrenValues = await getChildrenValuesComRetry<ResultadoEmitNfcom>(ctx);
+		const passada = await decidirPassadaEmissao(job, childrenValues);
+		if (passada === "aguardar") {
+			// Notas em andamento: estaciona em `waiting-children` (sem custo de
+			// attempt). Se todas já terminaram (values ainda não visíveis),
+			// consolida pelo estado real (A2).
+			if (await estacionarOuPronto(ctx)) return consolidarCobrancaPorEstado(job as JobLike<EmitCobrancaData>, deps);
+		}
+		if (passada === "segunda") {
+			return consolidarCobranca(job as JobLike<EmitCobrancaData>, childrenValues!, deps);
+		}
+		if (passada === "exaustas") {
+			// Notas terminadas sem returnvalue (failed/exaustos) → deriva o
+			// ResultadoEmitCobranca pelo estado REAL (A2): boleto pela key de
+			// idempotência, notas pelos status persistidos.
+			return consolidarCobrancaPorEstado(job as JobLike<EmitCobrancaData>, deps);
+		}
+		const res = await handleEmitCobranca(job as JobLike<EmitCobrancaData>, { ...deps, enqueueFilho: ctx.enqueueFilho });
+		// Fan-out enfileirou notas → estaciona em `waiting-children` (mesmo
+		// motivo do parent: retorno normal com children pendentes queima
+		// attempts). `notasEnfileiradas === 0` = sem children → retorna.
+		if (res.notasEnfileiradas > 0) await estacionarOuPronto(ctx);
+		return res;
+	}
+	if (jobName === "emit-nfcom") {
+		return handleEmitNfcom(job as JobLike<EmitNfcomData>, deps);
+	}
+	throw new ErroFatal(`job desconhecido na fila emissao: ${jobName}`);
 }
 
 // ============================================================
@@ -824,29 +1084,8 @@ export function criarEmissaoWorker(deps: EmissaoDeps): EmissaoWorkers {
 	// getChildrenValues — sem contador manual no SQLite (ADR-0002). Isso vale tanto
 	// para `emit-fatura` (consolida a fatura) quanto para `emit-cobranca` (coleta os
 	// ResultadoEmitNfcom → notasOk[], M1).
-	/**
- * Lê os `returnvalue`s dos children via `getChildrenValues`, com retry curto.
- * Race BullMQ (C4): o parent é reativado quando os children completam, mas o
- * `returnvalue` final do child pode não estar visível no instante exato do
- * reprocessamento (child faz 2 passadas; o valor final só persiste ao fim).
- * Sem o retry, o parent cai no fan-out de novo, `acquireLease` falha (lease da
- * 1ª passada ainda lá) e "pula" — a consolidação nunca roda. Retry curto (até
- * ~500ms) resolve sem custo perceptível quando os valores já estão disponíveis.
- */
-async function getChildrenValuesComRetry<T>(
-	job: import("bullmq").Job,
-	retries = 10,
-	delayMs = 50,
-): Promise<Record<string, T> | undefined> {
-	for (let i = 0; i < retries; i++) {
-		const cv = await job.getChildrenValues<T>();
-		if (cv && Object.keys(cv).length > 0) return cv;
-		await new Promise((r) => setTimeout(r, delayMs));
-	}
-	return job.getChildrenValues<T>();
-}
 
-const wiring = (async () => {
+	const wiring = (async () => {
 		const [{ Worker, FlowProducer }, { getQueue, WORKER_DEFAULTS }, { getRedis }, { QUEUE_NAMES, JOB_NAMES }] =
 			await Promise.all([
 				import("bullmq"),
@@ -873,54 +1112,35 @@ const wiring = (async () => {
 				}
 			};
 
-		const workerDepsPara = (enqueueFilho?: EmissaoDeps["enqueueFilho"]): EmissaoDeps =>
-			enqueueFilho ? { ...deps, enqueueFilho } : deps;
-
 		const worker = new Worker(
 			QUEUE_NAMES.EMISSAO,
-			async (job) => {
+			// 2º arg `token` (lock do worker) é repassado ao ctx p/ o parent
+			// chamar `job.moveToWaitingChildren(token)` — o idiom BullMQ de
+			// "pai espera children" sem custo de attempt (WaitingChildrenError).
+			async (job, token) => {
 				// M8: logs o erro final UMA vez com fila+jobId antes de re-propagar
 				// (BullMQ retenta), no estilo do outbox.worker (ADR-0008).
 				try {
-					const jobName = job.name as string;
-					// Parent (emit-fatura): se tem children values disponíveis (segunda
-					// passada, após children completarem) → consolida. Senão → fan-out.
-					if (jobName === JOB_NAMES.EMIT_FATURA) {
-						// Parent tem 2 passadas (ADR-0002): 1ª fan-out cobranças; 2ª (após
-						// children completarem) consolida o estado final. Distinguimos pelas
-						// `childrenValues` (returnvalue dos children): se há, é a 2ª passada.
-						//
-						// Race BullMQ: o parent é reativado quando os children completam, mas o
-						// `returnvalue` do child pode não estar visível em `getChildrenValues`
-						// no instante exato do reprocessamento (o child faz 2 passadas p/
-						// consolidar suas notas, e o `returnvalue` final só persiste ao fim).
-						// Retry curto evita cair no fan-out de novo (que tentaria re-adquirir o
-						// lease e "pularia", deixando a fatura sem consolidação).
-						const childrenValues = await getChildrenValuesComRetry<ResultadoEmitCobranca>(job);
-						if (childrenValues && Object.keys(childrenValues).length > 0) {
-							return consolidarFaturaOuCobranca(job, childrenValues, deps);
-						}
-						// Primeira passada: fan-out. Enfileira os children com ESTE job como
-						// parent (per-job, não global — segue a concorrência).
-						const enqueueFilho = enqueueFilhoPara({ id: job.id ?? "", queue: queue.qualifiedName });
-						return await handleEmitFatura(job as unknown as JobLike<EmitFaturaData>, workerDepsPara(enqueueFilho));
-					}
-					if (jobName === JOB_NAMES.EMIT_COBRANCA) {
-						// emit-cobranca tem 2 passadas (M1), igual o parent: 1ª fan-out das
-						// notas; 2ª (após notas completarem) coleta os ResultadoEmitNfcom e
-						// devolve o ResultadoEmitCobranca final com notasOk[] reais.
-						const childrenValues = await getChildrenValuesComRetry<ResultadoEmitNfcom>(job);
-						if (childrenValues && Object.keys(childrenValues).length > 0) {
-							return consolidarCobranca(job as unknown as JobLike<EmitCobrancaData>, childrenValues, deps);
-						}
-						const enqueueFilho = enqueueFilhoPara({ id: job.id ?? "", queue: queue.qualifiedName });
-						return await handleEmitCobranca(job as unknown as JobLike<EmitCobrancaData>, workerDepsPara(enqueueFilho));
-					}
-					if (jobName === JOB_NAMES.EMIT_NFCOM) {
-						return handleEmitNfcom(job as unknown as JobLike<EmitNfcomData>, workerDepsPara(undefined));
-					}
-					throw new ErroFatal(`job desconhecido na fila emissao: ${jobName}`);
+					// A1: a decisão 1ª vs 2ª passada vive no `processarJobEmissao`
+					// (testável sem Redis) — aqui só ligamos o job real do BullMQ ao
+					// ctx (getChildrenValues/getDependencies do job; fan-out per-job via
+					// `queue.add(..., { parent }`), seguro p/ concurrency>1 (ADR-0002).
+					const ctx: WorkerCtx = {
+						jobName: job.name as string,
+						jobId: job.id ?? "",
+						job: job as unknown as JobLike,
+						getChildrenValues: <T>() => job.getChildrenValues<T>(),
+						enqueueFilho: enqueueFilhoPara({ id: job.id ?? "", queue: queue.qualifiedName }),
+						token: token ?? "",
+					};
+					return await processarJobEmissao(ctx, deps);
 				} catch (err) {
+					// WaitingChildrenError: NÃO é falha — é o idiom "pai espera
+					// children" (moveToWaitingChildren). Re-propaga sem logar
+					// (o worker BullMQ estaciona o job, sem custo de attempt).
+					if (err instanceof WaitingChildrenError || (err instanceof Error && err.name === "WaitingChildrenError")) {
+						throw err;
+					}
 					// M8: loga o erro final UMA vez com fila+jobId; re-propaga para o
 					// BullMQ decidir retry (ErroRetryable) ou falha (ErroFatal/exausto).
 					log.error(
@@ -985,18 +1205,93 @@ export async function consolidarFaturaOuCobranca(
 		notasOk: v.notasOk ?? [],
 	}));
 	const status = consolidar(resultados);
+	await consolidarFaturaEliberar(db, deps, data.faturaId, status);
+	return { status };
+}
+
+/**
+ * Escreve o status final da fatura (outbox + webhook) e libera o lease —
+ * compartilhado pela consolidação via childrenValues (M1), pelo M3/A3 (0
+ * a-emitir) e pelo fallback A2 (children exaustos).
+ */
+async function consolidarFaturaEliberar(
+	db: EmissaoDeps["db"],
+	deps: EmissaoDeps,
+	faturaId: number,
+	status: StatusFatura,
+): Promise<void> {
 	await enqueueOutbox(db, {
 		aggregate: "fatura",
-		aggregateId: data.faturaId,
-		payload: { op: "atualizarStatusFatura", id: data.faturaId, status },
+		aggregateId: faturaId,
+		payload: { op: "atualizarStatusFatura", id: faturaId, status },
 	});
 	await enfileirarEventoWebhook(deps, {
-		faturaId: data.faturaId,
+		faturaId,
 		tipo: "fatura.status",
-		alvo: { faturaId: data.faturaId },
+		alvo: { faturaId },
 		estado: status,
 	});
-	await releaseLease(db, data.faturaId);
-	log.info({ faturaId: data.faturaId, status }, "fatura consolidada");
+	await releaseLease(db, faturaId);
+	log.info({ faturaId, status }, "fatura consolidada");
+}
+
+/**
+ * Fallback A2 do parent: 2ª passada sem `childrenValues` (todos os children
+ * failed/exaustos — exaustos não produzem `returnvalue`). Recarrega a fatura
+ * pelo estado REAL persistido (`atacado.getFaturaPorId`) e deriva
+ * `ResultadoCobranca[]` dos status das cobranças/notas. O `childrenValues`
+ * segue como fonte primária quando disponível (M1 — coleta via Flow,
+ * ADR-0002); o estado do CRM é apenas o fallback.
+ *
+ * Defesa: sem fatura ou sem cobranças definidas (estado inesperado — nunca
+ * houve children p/ falhar), remenda com `a-emitir` para não trancar o
+ * lease com status de ciclo.
+ */
+export async function consolidarFaturaPorEstado(
+	job: JobLike<EmitFaturaData>,
+	deps: EmissaoDeps,
+): Promise<{ status: StatusFatura }> {
+	const db = helperDb(deps.db);
+	const fatura = await deps.atacado.getFaturaPorId(job.data.faturaId);
+	const resultados = fatura ? resultadosDaFatura(fatura) : [];
+	if (!fatura || resultados.length === 0) {
+		log.warn(
+			{ faturaId: job.data.faturaId },
+			"fallback A2: fatura sem cobranças definidas — remendando a-emitir (defesa do lease)",
+		);
+		await consolidarFaturaEliberar(db, deps, job.data.faturaId, "a-emitir");
+		return { status: "a-emitir" };
+	}
+	const status = consolidar(resultados);
+	await consolidarFaturaEliberar(db, deps, job.data.faturaId, status);
 	return { status };
+}
+
+/**
+ * Fallback A2 do `emit-cobranca`: 2ª passada sem `childrenValues` (notas
+ * failed/exaustos). Deriva o `ResultadoEmitCobranca` pelo estado REAL: boleto
+ * pela key de idempotência (resolved ⇒ emitido — mesma fonte do
+ * `consolidarCobranca`) e notas pelos `statusInterno` persistidos da cobrança.
+ */
+export async function consolidarCobrancaPorEstado(
+	job: JobLike<EmitCobrancaData>,
+	deps: EmissaoDeps,
+): Promise<ResultadoEmitCobranca> {
+	const db = helperDb(deps.db);
+	const d = job.data;
+	const boleto = await acquireKey(db, `cobranca:${d.cobrancaId}:boleto`, "asaas");
+	const boletoOk = boleto.status === "resolved";
+	const notasOk: boolean[] = [];
+	const fatura = await deps.atacado.getFaturaPorId(d.faturaId);
+	const cobranca = fatura?.cobrancas.find((c) => c.id === d.cobrancaId);
+	if (cobranca) {
+		notasOk.push(...cobranca.notas.map((n) => n.statusInterno === "emitida"));
+	} else {
+		log.warn({ cobrancaId: d.cobrancaId }, "fallback A2: cobrança não encontrada na fatura — notasOk vazio");
+	}
+	log.info(
+		{ cobrancaId: d.cobrancaId, boletoOk, notasOk: notasOk.length },
+		"cobranca consolidada por estado real (2ª passada sem childrenValues)",
+	);
+	return { boletoOk, notasOk, erro: boletoOk ? undefined : "boleto não emitido" };
 }

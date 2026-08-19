@@ -11,7 +11,7 @@
  * NFCom é obrigação fiscal do serviço). Um boleto falho com nota ok conta como
  * sucesso parcial, não erro — a fatura tende a `parcial`, não `erro`.
  */
-import type { StatusFatura } from "#/domain/types";
+import type { Fatura, StatusFatura } from "#/domain/types";
 
 /**
  * Fuso horário do domínio (CONVENTIONS.md m7): datas puras de domínio são
@@ -75,4 +75,26 @@ export function consolidarFatura(
 	if (algumaNotaOk) return { status: "parcial" };
 	// Nada ok nem de boleto nem de nota → erro (caso 10).
 	return { status: "erro" };
+}
+
+/**
+ * Deriva `ResultadoCobranca[]` dos STATUS REAIS persistidos da fatura (fallback
+ * da consolidação quando `getChildrenValues` vem vazio — ex.: children exaustos
+ * sem `returnvalue`). Fontes: `cobranca.status` (emitida ⇒ boleto emitido) e
+ * `nota.statusInterno` (emitida ⇒ nota emitida).
+ *
+ * Cobranças `a-emitir` são EXCLUÍDAS (não são falhas — nada tentou emití-las
+ * ainda; o parent só chega aqui com children pendentes ou exaustos) e notas
+ * `a-emitir` contam como `false` (a emissão não concluiu). Sem as cobranças
+ * emitidas, o array vazio cai no ramo `a-emitir` do `consolidarFatura` (m3) —
+ * quem chama decide o remendo p/ o lease (defesa p/ estados inesperados).
+ */
+export function resultadosDaFatura(fatura: Fatura): ResultadoCobranca[] {
+	return fatura.cobrancas
+		.filter((c) => c.status !== "a-emitir")
+		.map((c) => ({
+			cobrancaId: c.id ?? 0,
+			boletoOk: c.status === "emitida",
+			notasOk: c.notas.map((n) => n.statusInterno === "emitida"),
+		}));
 }
