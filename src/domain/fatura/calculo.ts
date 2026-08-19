@@ -56,6 +56,7 @@ export function calcularFatura(
 	if (validos.length === 0) {
 		erros.push({
 			tipo: "FATAL",
+			codigo: "SEM_CLIENTES",
 			mensagem: "Nenhum cliente com linhas ativas encontrado para faturamento",
 		});
 		// retorna fatura vazia (sem árvore) — o caller decide 422
@@ -84,6 +85,7 @@ export function calcularFatura(
 	if (Math.abs(somaNotas - valorTotal) > 1) {
 		erros.push({
 			tipo: "FATAL",
+			codigo: "SOMA_DIVERGENTE",
 			mensagem: `Inconsistência de cálculo: soma das notas (${somaNotas}) ≠ total da fatura (${valorTotal})`,
 		});
 	}

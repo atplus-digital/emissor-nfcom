@@ -117,7 +117,7 @@ describe("POST /faturas/preparar — rota fina (M7) + upsert preserva árvore (m
 describe("classificarErrosCalculo (M10 — caso 11 divergência de soma)", () => {
 	test("divergência de soma → 500 ERRO_INTERNO (defensivo)", () => {
 		const { status, tipo } = classificarErrosCalculo([
-			{ tipo: "FATAL", mensagem: "Inconsistência de cálculo: soma das notas (1200) ≠ total da fatura (1100)" },
+			{ tipo: "FATAL", codigo: "SOMA_DIVERGENTE", mensagem: "Inconsistência de cálculo: soma das notas (1200) ≠ total da fatura (1100)" },
 		]);
 		expect(status).toBe(500);
 		expect(tipo).toBe("ERRO_INTERNO");
@@ -125,7 +125,7 @@ describe("classificarErrosCalculo (M10 — caso 11 divergência de soma)", () =>
 
 	test("erro de cálculo sem divergência → 422 VALIDACAO", () => {
 		const { status, tipo } = classificarErrosCalculo([
-			{ tipo: "FATAL", mensagem: "Nenhum cliente com linhas ativas encontrado para faturamento" },
+			{ tipo: "FATAL", codigo: "SEM_CLIENTES", mensagem: "Nenhum cliente com linhas ativas encontrado para faturamento" },
 		]);
 		expect(status).toBe(422);
 		expect(tipo).toBe("VALIDACAO");

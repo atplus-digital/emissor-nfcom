@@ -59,17 +59,14 @@ export interface PrepararResultado {
  * um erro interno de cálculo — não deveria ocorrer (o cálculo é determinístico)
  * — e a spec manda tratá-lo como 500 ERRO_INTERNO defensivo.
  *
- * O erro de divergência do `calcularFatura` não carrega um código discriminativo
- * (é `tipo: "FATAL"`, igual aos demais), então a distinção é por heurística de
- * mensagem ("soma"/"≠"/"diverge"). Adicionar um campo `tipo`/`classificacao`
- * discriminativo em `calculo.ts` (fora do escopo deste ciclo) tornaria isso
- * explícito — ver TODO abaixo.
+ * A distinção usa o discriminador `ErroValidacao.codigo` (`SOMA_DIVERGENTE`),
+ * definido pelo `calculo.ts` — não por substring da mensagem.
  */
 export function classificarErrosCalculo(erros: ErroValidacao[]): { status: number; tipo: TipoErro } {
-	// TODO(m10): tornar explícito em `calculo.ts` com um campo de classificação;
-	// hoje é heurística por substring da mensagem de divergência de soma.
-	const divergencia = erros.find((e) => /soma|≠|diverge/i.test(e.mensagem));
-	if (divergencia) {
+	// Classificação pelo discriminador estável `codigo` (calculo.ts) — divergência
+	// de soma é inconsistência interna (500); demais erros de cálculo → validação
+	// (422). A mensagem é texto de exibição e não participa da decisão.
+	if (erros.some((e) => e.codigo === "SOMA_DIVERGENTE")) {
 		return { status: 500, tipo: TipoErro.ERRO_INTERNO };
 	}
 	return { status: 422, tipo: TipoErro.VALIDACAO };

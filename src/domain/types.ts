@@ -65,6 +65,13 @@ export interface ErroValidacao {
 	 * atam a um campo.
 	 */
 	campo?: string;
+	/**
+	 * Discriminador estável da origem do erro (ex.: `SOMA_DIVERGENTE`,
+	 * `SEM_CLIENTES`). Opcional: erros de validação de campo não usam.
+	 * A classificação de status da rota usa `codigo`, não substring de
+	 * `mensagem` (que é texto de exibição).
+	 */
+	codigo?: "SOMA_DIVERGENTE" | "SEM_CLIENTES";
 	mensagem: string;
 }
 
