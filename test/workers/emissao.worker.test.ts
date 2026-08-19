@@ -2,6 +2,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
 	consolidar,
+	consolidarCobranca,
 	consolidarFaturaOuCobranca,
 	handleEmitFatura,
 	handleEmitNfcom,
@@ -197,6 +198,87 @@ describe("M1 — consolidação por grandchildren", () => {
 			{ db, atacado: {} as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any },
 		);
 		expect(res.status).toBe("erro");
+	});
+});
+
+describe("M1 — consolidarCobranca (2ª passada do emit-cobranca)", () => {
+	test("boleto resolved + notasOk dos grandchildren → {boletoOk, notasOk}", async () => {
+		const db = await mkDb();
+		const { acquireKey, resolveKey } = await import("#/lib/db/idempotency");
+		await acquireKey(db, "cobranca:961:boleto", "asaas");
+		await resolveKey(db, "cobranca:961:boleto", "bol_1");
+		const job = { data: { cobrancaId: 961 } } as any;
+		const childrenValues: Record<string, any> = {
+			"1": { notaOk: true },
+			"2": { notaOk: false },
+		};
+		const res = await consolidarCobranca(job, childrenValues, { db } as any);
+		expect(res).toEqual({ boletoOk: true, notasOk: [true, false], erro: undefined });
+	});
+
+	test("boleto sem key (não emitido) → boletoOk false + erro", async () => {
+		const db = await mkDb();
+		const job = { data: { cobrancaId: 962 } } as any;
+		const res = await consolidarCobranca(job, { "1": { notaOk: true } }, { db } as any);
+		expect(res.boletoOk).toBe(false);
+		expect(res.notasOk).toEqual([true]);
+		expect(res.erro).toBe("boleto não emitido");
+	});
+});
+
+describe("C2 — toResumoNota: fan-out leva o resumo completo da nota", () => {
+	test("nota a-emitir → resumo com campos fiscais + itens; nota emitida é filtrada", async () => {
+		const db = await mkDb();
+		const endereco = { logradouro: "R", numero: "7", bairro: "B", cep: "80", cidade: "C", uf: "PR" };
+		const fatura = faturaFixture({ id: 970, cobrancas: [
+			{
+				id: 971, faturaId: 970, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1",
+				emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10",
+				notas: [
+					{
+						id: 972, cobrancaId: 971, nome: "João", cpfcnpj: "52998224725", email: "j@x.com",
+						rgie: "12345", telefone: "41999990000", endereco, uf: "PR", cidade: "C",
+						statusInterno: "a-emitir" as const, total: 6000,
+						itens: [{ descricao: "Plano", cfop: "6102", cclass: "0000", quantidade: 1, unitario: 6000, total: 6000, aliqIcms: 0, bcIcms: 0, icms: 0, incideAliquota: false }],
+					},
+					{
+						id: 973, cobrancaId: 971, nome: "Maria", cpfcnpj: "111", email: "m@x.com",
+						endereco, uf: "PR", cidade: "C", statusInterno: "emitida" as const, total: 4000, itens: [],
+					},
+				],
+			},
+		] });
+		const enqueuedData: Array<[string, unknown]> = [];
+		await handleEmitFatura(
+			{ data: { faturaId: 970 }, attemptsMade: 0, opts: {} } as any,
+			{
+				db,
+				atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort,
+				asaas: {} as any, nfcom: {} as any,
+				enqueueFilho: async (n: string, data: unknown) => { enqueuedData.push([n, data]); },
+			},
+		);
+		// o child é emit-cobranca; o resumo das notas a-emitir vai no
+		// EmitCobrancaData (toResumoNota carrega os campos que o emit-nfcom usa)
+		const [nome, data] = enqueuedData[0] as [string, any];
+		expect(nome).toBe("emit-cobranca");
+		expect(data.notas).toHaveLength(1);
+		expect(data.notas[0]).toMatchObject({
+			notaId: 972,
+			cpfcnpj: "52998224725",
+			nome: "João",
+			email: "j@x.com",
+			rgie: "12345",
+			telefone: "41999990000",
+			uf: "PR",
+			cidade: "C",
+			logradouro: "R",
+			numero: "7",
+			bairro: "B",
+			cep: "80",
+			total: 6000,
+		});
+		expect(data.notas[0].itens).toHaveLength(1);
 	});
 });
 

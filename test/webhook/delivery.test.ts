@@ -10,6 +10,7 @@ import {
 	assinarWebhook,
 	calcularEventoId,
 	enviarWebhook,
+	handleWebhookSend,
 } from "#/workers/webhook.worker";
 
 const eventoBase: EventoWebhook = {
@@ -136,5 +137,53 @@ describe("enviarWebhook (SPEC-0001 caso 12 — não-2xx → throw/retry)", () =>
 				fetchImpl: fetchImpl as unknown as typeof fetch,
 			}),
 		).rejects.toThrow("ECONNREFUSED");
+	});
+});
+
+describe("handleWebhookSend (handler do job webhook-send)", () => {
+	test("entrega o evento ao receptor (2xx) — corpo + assinatura no header", async () => {
+		const fetchImpl = mock((_url: unknown, _init?: unknown) =>
+			Promise.resolve({
+				ok: true,
+				status: 200,
+				text: () => Promise.resolve(""),
+			} as unknown as Response),
+		);
+		const job = { id: "job-1", data: { ...eventoBase, eventoId: "id-1" } };
+		await handleWebhookSend(job as never, {
+			config: {
+				url: "https://cliente.example/hook",
+				secret: "segredo",
+				fetchImpl: fetchImpl as unknown as typeof fetch,
+			},
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		const [url, init] = fetchImpl.mock.calls[0] as [unknown, RequestInit];
+		expect(url).toBe("https://cliente.example/hook");
+		const body = String(init?.body);
+		expect(JSON.parse(body)).toEqual({ ...eventoBase, eventoId: "id-1" });
+		expect((init?.headers as Record<string, string>)["X-Webhook-Signature"]).toBe(
+			assinarWebhook(body, "segredo"),
+		);
+	});
+
+	test("não-2xx → rejeita (BullMQ retenta; caso 12)", async () => {
+		const fetchImpl = mock(() =>
+			Promise.resolve({
+				ok: false,
+				status: 503,
+				text: () => Promise.resolve("indisponível"),
+			} as unknown as Response),
+		);
+		const job = { id: "job-2", data: eventoBase };
+		await expect(
+			handleWebhookSend(job as never, {
+				config: {
+					url: "https://cliente.example/hook",
+					secret: "segredo",
+					fetchImpl: fetchImpl as unknown as typeof fetch,
+				},
+			}),
+		).rejects.toThrow(/503/);
 	});
 });

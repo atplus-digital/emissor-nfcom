@@ -14,6 +14,7 @@ import {
 	despacharOutbox,
 	entregarLinha,
 	drenarEEntregar,
+	handleOutboxRelay,
 	MAX_OUTBOX_ATTEMPTS,
 	type OutboxPayload,
 } from "#/workers/outbox.worker";
@@ -321,5 +322,31 @@ describe("outbox.worker — interop com o worker de emissão", () => {
 			method: "registrarErro",
 			args: [{ notaId: 7, erro: "NFCOM_DEDUP", mensagem: "suspeita" }],
 		});
+	});
+});
+
+describe("outbox.worker — handleOutboxRelay (handler do job outbox-relay)", () => {
+	test("drena o outbox e devolve o nº de entregas", async () => {
+		const atacado = fakeAtacado();
+		await enqueueOutbox(db, {
+			aggregate: "fatura",
+			aggregateId: 1,
+			payload: { op: "atualizarStatusFatura", id: 1, status: "emitida" },
+		});
+		const r = await handleOutboxRelay({ id: "job-1" }, { db, atacado });
+		expect(r).toEqual({ entregues: 1 });
+		expect(await drainOutbox(db, 10)).toEqual([]);
+	});
+
+	test("outbox vazio → { entregues: 0 }", async () => {
+		const atacado = fakeAtacado();
+		const r = await handleOutboxRelay({ id: "job-2" }, { db, atacado });
+		expect(r).toEqual({ entregues: 0 });
+	});
+
+	test("db ausente → lança (composition root faltante)", async () => {
+		await expect(
+			handleOutboxRelay({ id: "job-3" }, { atacado: fakeAtacado() } as any),
+		).rejects.toThrow(/db não injetado/);
 	});
 });

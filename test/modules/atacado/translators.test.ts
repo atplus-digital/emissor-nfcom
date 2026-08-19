@@ -4,6 +4,10 @@ import { parceiroToDomain } from "#/modules/atacado/translators/parceiro";
 import { clienteToDomain } from "#/modules/atacado/translators/cliente";
 import { faturaToCreate, faturaToDomain } from "#/modules/atacado/translators/fatura";
 import { cobrancaToCreate, cobrancaToDomain } from "#/modules/atacado/translators/cobranca";
+import {
+	mesDeDataReferencia,
+	montarDescricaoCobranca,
+} from "#/domain/fatura/descricao";
 import { notaToCreate, notaToDomain } from "#/modules/atacado/translators/nota";
 import { itemToCreate, itemToDomain } from "#/modules/atacado/translators/item";
 
@@ -255,6 +259,45 @@ describe("translators/cobranca", () => {
 			f_status: "a-emitir",
 			f_data_vencimento: "2026-09-10",
 		});
+	});
+
+	it("mesDeDataReferencia: YYYY-MM-01 → 'Mês/AAAA' (pt-BR)", () => {
+		expect(mesDeDataReferencia("2026-08-01")).toBe("Ago/2026");
+		expect(mesDeDataReferencia("2026-01-01")).toBe("Jan/2026");
+		expect(mesDeDataReferencia("2026-12-15")).toBe("Dez/2026");
+		expect(() => mesDeDataReferencia("agosto/2026")).toThrow(/inválida/);
+	});
+
+	it("montarDescricaoCobranca: lista itens + referência de mês", () => {
+		const itens = [
+			{
+				descricao: "Voz Empresarial",
+				cfop: "6102",
+				cclass: "0000",
+				quantidade: 2,
+				unitario: 5000,
+				total: 10000,
+				aliqIcms: 0,
+				bcIcms: 10000,
+				icms: 0,
+				incideAliquota: false,
+			},
+			{
+				descricao: "Internet 500MB",
+				cfop: "6102",
+				cclass: "0000",
+				quantidade: 1,
+				unitario: 9990,
+				total: 9990,
+				aliqIcms: 0,
+				bcIcms: 9990,
+				icms: 0,
+				incideAliquota: false,
+			},
+		];
+		expect(montarDescricaoCobranca(itens, "2026-08-01")).toBe(
+			"2x Voz Empresarial = R$ 100,00\n1x Internet 500MB = R$ 99,90\nAgo/2026",
+		);
 	});
 
 	it("cobrancaToDomain mapeia f_* → Cobranca com notas", () => {

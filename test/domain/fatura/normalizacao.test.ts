@@ -14,4 +14,9 @@ describe("normalizarDataReferencia", () => {
 	it("normaliza dia de fim de mês", () => {
 		expect(normalizarDataReferencia("2026-12-31")).toBe("2026-12-01");
 	});
+
+	it("lança erro para data fora do formato YYYY-MM-DD", () => {
+		expect(() => normalizarDataReferencia("15/08/2026")).toThrow(/inválida/);
+		expect(() => normalizarDataReferencia("2026-08")).toThrow(/inválida/);
+	});
 });

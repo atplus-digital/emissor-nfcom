@@ -1,6 +1,15 @@
 import { describe, expect, it, mock } from "bun:test";
 import { AsaasApiError, createAsaasClient } from "#/modules/asaas/asaas.client";
 
+// Mock do env ANTES dos imports dinâmicos (o client lê `#/env` lazy quando o
+// caller não injeta baseUrl/apiKey — mesmo padrão do flow.test.ts).
+mock.module("#/env", () => ({
+	env: {
+		ASAAS_API_URL: "https://asaas.env.test",
+		ASAAS_API_KEY: "env-key",
+	},
+}));
+
 /** fetch fake — retorna Response-like com status + text/json (o cliente lê
  * `text` via httpFetch, ADR-0005). */
 function fakeFetch(response: { status: number; body: unknown }) {
@@ -24,6 +33,19 @@ const NO_ENV_OPTS = {
 	baseUrl: "https://asaas.test",
 	apiKey: "test-key",
 } as const;
+
+describe("asaas.client · env lazy (sem opts injetados)", () => {
+	it("usa env.ASAAS_API_URL/API_KEY e trima sufixo /v3 do env legado", async () => {
+		const f = fakeFetch({ status: 200, body: { data: [], totalCount: 0 } });
+		const client = createAsaasClient({ fetchImpl: f });
+		await client.buscarCustomerPorDocumento("111");
+		const url = (f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string;
+		expect(url).toBe("https://asaas.env.test/v3/customers?cpfCnpj=111");
+		expect(url).not.toContain("/v3/v3/");
+		const init = (f as unknown as ReturnType<typeof mock>).mock.calls[0][1] as RequestInit;
+		expect((init.headers as Record<string, string>).access_token).toBe("env-key");
+	});
+});
 
 describe("asaas.client · buscarCustomerPorDocumento", () => {
 	it("normaliza baseUrl com sufixo /v3 (evita path /v3/v3/... → 404)", async () => {

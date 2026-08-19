@@ -24,6 +24,19 @@ describe("createRateLimiter (ADR-0002)", () => {
 		await new Promise((r) => setTimeout(r, 1050));
 		expect(limiter.tryAcquire()).toBeTruthy();
 	});
+
+	it("acquire() faz poll até haver slot (2ª chamada aguarda a janela)", async () => {
+		const limiter = createRateLimiter(1);
+		const release1 = await limiter.acquire();
+		// 1ª chamada consumiu o slot da janela de 1s — a 2ª precisa aguardar.
+		const t0 = Date.now();
+		const release2 = await limiter.acquire();
+		expect(Date.now() - t0).toBeGreaterThanOrEqual(25); // poll (sleepMs = 25)
+		// release devolve o slot ao contador (tryAcquire volta a passar)
+		release1();
+		release2();
+		expect(limiter.tryAcquire()).toBeTruthy();
+	});
 });
 
 describe("wrapWithRateLimit (ADR-0002)", () => {

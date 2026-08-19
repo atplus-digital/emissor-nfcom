@@ -46,7 +46,7 @@ class FakeQueue {
 mock.module("bullmq", () => ({ Queue: FakeQueue, Worker: class {} }));
 
 // Import modules that depend on env/ioredis/bullmq AFTER mocks are registered.
-const { getRedis } = await import("#/lib/redis");
+const { getRedis, _resetRedisForTests } = await import("#/lib/redis");
 const { getQueue, WORKER_DEFAULTS, gracefulShutdown } = await import("#/lib/queues");
 const { Queue } = await import("bullmq");
 
@@ -82,6 +82,16 @@ describe("redis", () => {
 		expect(a).toBe(b);
 		expect(ctorCalls.length).toBe(1);
 		expect(ctorCalls[0]?.url).toBe("redis://test:6390");
+	});
+
+	it("_resetRedisForTests() descarta o singleton e cria nova instância", () => {
+		const a = getRedis();
+		_resetRedisForTests();
+		const b = getRedis();
+		expect(b).not.toBe(a);
+		// FakeRedis do mock (lazyConnect) — nada a desconectar de verdade;
+		// descarta a referência p/ o GC (a instância real usaria lazyConnect tb).
+		expect(a).toBeTruthy();
 	});
 });
 
@@ -120,5 +130,20 @@ describe("queues", () => {
 		// biome-ignore lint/suspicious/noExplicitAny:
 		await gracefulShutdown([fakeWorker as any]);
 		expect(closed).toEqual([true]);
+	});
+
+	it("worker que trava no close → timeout de drenagem exaurido e o shutdown segue (ADR-0002)", async () => {
+		const stuck = {
+			close: () => new Promise<void>(() => {}), // nunca resolve (worker travado)
+		};
+		const ok = { close: async () => {} };
+		// timeoutMs curto (50ms): o race do worker travado rejeita → o catch
+		// descarta e o shutdown completa (não trava o boot/stop).
+		await expect(gracefulShutdown([stuck, ok] as any, 50)).resolves.toBeUndefined();
+	});
+
+	it("worker que rejeita no close → shutdown segue (catch por worker)", async () => {
+		const failing = { close: async () => { throw new Error("close failed"); } };
+		await expect(gracefulShutdown([failing] as any, 50)).resolves.toBeUndefined();
 	});
 });
