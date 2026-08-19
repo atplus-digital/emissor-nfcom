@@ -1,0 +1,28 @@
+[test]
+# GATE DE COBERTURA (DoD global — AGENTS.md §"Gate de cobertura").
+#
+# `coverageThreshold` é aplicado **por arquivo** no Bun 1.3.x (mais estrito que
+# a doc, que descreve o piso como global). `bun test --coverage` (script
+# `test:coverage`) sai com exit 1 se QUALQUER arquivo medido ficar abaixo do
+# piso em `lines` OU `functions`. O script `test` (sem `--coverage`) NÃO aplica
+# o gate — segue rápido e sem gate.
+#
+# Escala: fração 0–1. Piso atual = 0.90 ("no mínimo 90% em tudo"); o objetivo
+# de estirar para 0.95 fica como stretch (exige fechar os poucos arquivos de
+# tooling hoje em 90,5–94,7 — ver AGENTS.md).
+#
+# Falha de gate = exit 1 SEM mensagem (bug do Bun, oven-sh/bun#17028) — a tabela
+# por arquivo ainda imprime; procure a linha abaixo do piso.
+coverageThreshold = { lines = 0.90, functions = 0.90 }
+
+# Arquivos fora do denominador de cobertura (e do gate):
+#   - src/generated/**       → output do gerador (ADR-0006), nunca testado à mão.
+#   - scripts/nocobase/src/utils/env.ts → limitação de instrumentação do Bun: os
+#     branches de env válida/inválida são mutuamente exclusivos num processo e o
+#     load inválido apaga a cobertura do corpo do módulo (isolado em 4 configs).
+#     O arquivo tem 16 testes passando que cobrem o comportamento; só a métrica
+#     não alcança 90% de funções. Excluído do gate, não do teste.
+coveragePathIgnorePatterns = [
+	"src/generated/**",
+	"scripts/nocobase/src/utils/env.ts",
+]

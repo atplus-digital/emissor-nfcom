@@ -6,6 +6,36 @@ on:
   pull_request:
 
 jobs:
+  test:
+    name: Test + coverage gate
+    runs-on: ubuntu-latest
+    services:
+      # O gate de cobertura (bunfig.toml coverageThreshold) exige o teste de
+      # integração do Flow (Redis real) — sem ele, o wiring dos workers fica
+      # fora do denominador e o gate falha. `bun run test` (sem coverage) segue
+      # verde sem Redis (o flow test skipIf gracioso).
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+          cache: true
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Test
+        run: bun run test
+      - name: Coverage gate
+        run: bun run test:coverage
+
   gitleaks:
     name: Gitleaks (secrets)
     runs-on: ubuntu-latest

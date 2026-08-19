@@ -51,7 +51,25 @@ bun run dev     # docker compose up: Redis + app (Hono :3000 + workers, bun --wa
 ```bash
 bun run typecheck        # exit 0
 bun run test             # tudo verde (bun test --isolate, script canônico)
+bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
 ```
+
+### Gate de cobertura (bunfig.toml `coverageThreshold`)
+
+- `bunfig.toml` impõe um piso de cobertura **por arquivo** (Bun 1.3.x aplica
+  `coverageThreshold` por arquivo, mais estrito que a doc). O piso atual e o
+  alvo de estirar para 95% ficam lá. Só se aplica quando `--coverage` roda
+  (`test:coverage`); o `bun run test` comum NÃO aplica o gate.
+- **`test:coverage` exige Redis local** — sem ele os testes de integração do
+  Flow skipIf e o wiring dos workers sai do denominador → o gate falha (por
+  design, evita false pass). Sobe o Redis com
+  `docker run -d --name emissor-test-redis -p 6379:6379 redis:7-alpine`
+  (o Redis do `compose.yaml` não tem port no host). `bun run test` (sem
+  coverage) segue verde sem Redis.
+- Falha de gate = **exit 1 sem mensagem** (bug do Bun, oven-sh/bun#17028) — a
+  tabela por arquivo ainda imprime; procure a linha abaixo do threshold.
+- **Arquivo novo em `src/**` nasce a 0% e quebra o gate silencioso**: todo novo
+  arquivo de código exige teste no mesmo PR.
 
 ## Como deployar
 
