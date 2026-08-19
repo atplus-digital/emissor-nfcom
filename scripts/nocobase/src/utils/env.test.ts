@@ -21,6 +21,12 @@ const VALID_ENV = {
 	NOCOBASE_API_KEY: "test-token",
 } as const;
 
+// Importa o módulo canônico uma única vez para cobrir o corpo de
+// resolveNocoBaseEnv (linhas 57-65). O import com query-string usado nos testes
+// de erro re-executa o top-level, mas a cobertura do corpo da função não é
+// atribuída de forma confiável a essas re-importações.
+import * as envModule from "./env";
+
 describe("env", () => {
 	const originalEnv = { ...process.env };
 
@@ -151,6 +157,20 @@ describe("env", () => {
 			const result = resolveNocoBaseEnv();
 
 			expect(result.requestHeaders).toBeUndefined();
+		});
+
+		it("TC-UT-ENV-015: resolveNocoBaseEnv (canonical import) returns the resolved shape", () => {
+			process.env = { ...VALID_ENV, NOCOBASE_APP: "a_atacado" };
+			const result = envModule.resolveNocoBaseEnv();
+
+			// O módulo canônico carrega o env no top-level; aqui validamos apenas a
+			// estrutura retornada (timeout fixo + escalamento dos demais campos).
+			expect(result).toMatchObject({
+				timeoutMs: 15_000,
+			});
+			expect(typeof result.baseUrl).toBe("string");
+			expect(typeof result.token).toBe("string");
+			expect(["info", "debug"]).toContain(result.logLevel);
 		});
 	});
 

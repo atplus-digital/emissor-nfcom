@@ -38,6 +38,10 @@ mock.module("@generators/lib/pipeline/runner", () => ({
 	runPipelineStages: vi.fn(),
 }));
 
+mock.module("@generators/lib/validation/validation-options", () => ({
+	isValidationSkipped: vi.fn(() => false),
+}));
+
 mock.module("./lifecycle-tasks", () => ({
 	backupCurrentOutput: vi.fn(),
 	diffTempVsOutput: vi.fn(),
@@ -52,6 +56,7 @@ import * as fs from "node:fs";
 import { applyWorkspaceLockIfNeeded } from "@generators/lib/io/locker";
 import { createReportsContext } from "@generators/lib/pipeline/reports";
 import { runPipelineStages } from "@generators/lib/pipeline/runner";
+import { isValidationSkipped } from "@generators/lib/validation/validation-options";
 import type { TaskRunner } from "@shared/types";
 import { runStandardPipeline } from "./lifecycle";
 import {
@@ -272,6 +277,69 @@ describe("lifecycle", () => {
 			"Sem alterações",
 		);
 		expect(validationTask?.skip?.({ hasChanges: true })).toBe(false);
+	});
+
+	// TC-UT-LIF-015: Validation task is skipped when --skip-validate is enabled
+	it("TC-UT-LIF-015: should skip validation task when validation is globally skipped", () => {
+		// Arrange
+		const mockTask = {
+			newListr: vi.fn().mockReturnValue({}),
+		};
+
+		isValidationSkipped.mockReturnValue(true);
+
+		const options = {
+			task: mockTask as unknown as TaskRunner,
+			defaultConfig: { outputPath: "src/generated" },
+			getOutputDirs: () => ["src/generated"],
+			stages: [],
+		};
+
+		// Act
+		runStandardPipeline(options);
+
+		// Assert - validation task skip returns the skip message
+		const callArgs = mockTask.newListr.mock.calls[0][0] as Array<{
+			title: string;
+			skip?: (ctx: { hasChanges: boolean }) => string | boolean;
+		}>;
+		const validationTask = callArgs.find(
+			(t) => t.title === "Validando saída gerada",
+		);
+		expect(validationTask).toBeDefined();
+		expect(validationTask?.skip?.({ hasChanges: true })).toBe(
+			"Validação desabilitada (--skip-validate)",
+		);
+		expect(isValidationSkipped).toHaveBeenCalled();
+	});
+
+	// TC-UT-LIF-016: Validation task invokes validateGeneratedOutput when not skipped
+	it("TC-UT-LIF-016: should call validateGeneratedOutput when validation runs", async () => {
+		// Arrange
+		const mockTask = {
+			newListr: vi.fn().mockReturnValue({}),
+		};
+
+		isValidationSkipped.mockReturnValue(false);
+
+		runStandardPipeline({
+			task: mockTask as unknown as TaskRunner,
+			defaultConfig: { outputPath: "src/generated" },
+			getOutputDirs: () => ["src/generated"],
+			stages: [],
+		});
+
+		const tasks = getLifecycleTasks(mockTask);
+		await runLifecycleTask(
+			tasks,
+			"Validando saída gerada",
+			{ hasChanges: true, diffs: [] },
+		);
+
+		expect(validateGeneratedOutput).toHaveBeenCalledWith(
+			expect.objectContaining({ hasChanges: true }),
+			expect.anything(),
+		);
 	});
 
 	// TC-UT-LIF-006: Lock task has async task function

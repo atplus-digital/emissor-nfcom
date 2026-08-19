@@ -144,4 +144,96 @@ describe("tsc-validator", () => {
 
 		expect(result).toBe(true);
 	});
+
+	it("TC-UT-VAL-012: returns empty list when directory does not exist", () => {
+		const result = listTypeScriptFilesInDirectory(
+			path.join(tempRoot, "missing-dir"),
+		);
+
+		expect(result).toEqual([]);
+	});
+
+	it("TC-UT-VAL-013: recurses into nested subdirectories", () => {
+		writeFile("nested/deep/file.ts", "export const a = 1;\n");
+		writeFile("nested/other.ts", "export const b = 2;\n");
+		writeFile("nested/other.d.ts", "export declare const c: number;\n");
+
+		const result = listTypeScriptFilesInDirectory(
+			path.join(tempRoot, "nested"),
+		);
+
+		expect(result).toHaveLength(3);
+	});
+
+	it("TC-UT-VAL-014: ignores non-TypeScript files when listing", () => {
+		writeFile("mixed/keep.ts", "export const a = 1;\n");
+		writeFile("mixed/skip.js", "export const b = 2;\n");
+		writeFile("mixed/skip.json", "{}");
+
+		const result = listTypeScriptFilesInDirectory(
+			path.join(tempRoot, "mixed"),
+		);
+
+		expect(result).toHaveLength(1);
+		expect(result[0]).toEndWith("keep.ts");
+	});
+
+	it("TC-UT-VAL-015: reads tsconfig for a non-tmp path (triggers temp cache prune)", async () => {
+		// Cria um arquivo fora de /tmp para que o slug do buildinfo NÃO comece
+		// com `_tmp_`, exercitando o branch que chama pruneStaleTempBuildInfos.
+		const nonTmpPath = path.join(
+			process.cwd(),
+			".cache",
+			"tsc-validator-test-non-tmp",
+			"valid.ts",
+		);
+		fs.mkdirSync(path.dirname(nonTmpPath), { recursive: true });
+		fs.writeFileSync(nonTmpPath, "export const ok: number = 1;\n", "utf-8");
+
+		try {
+			const result = await validateTypeScriptFiles([nonTmpPath]);
+
+			expect(result).toBe(true);
+		} finally {
+			fs.rmSync(path.dirname(nonTmpPath), { recursive: true, force: true });
+		}
+	});
+
+	it("TC-UT-VAL-016: prunes stale _tmp_ tsbuildinfo cache entries", async () => {
+		const cacheDir = path.resolve(
+			process.cwd(),
+			".cache",
+			"crm-atplus-tsc-validator",
+		);
+		// Garante que o dir de cache exista para a leitura.
+		fs.mkdirSync(cacheDir, { recursive: true });
+
+		// Cria arquivos _tmp_ falsos que deveriam ser varridos.
+		const staleA = path.join(cacheDir, "_tmp_fake-a.tsbuildinfo");
+		const staleB = path.join(cacheDir, "_tmp_fake-b.tsbuildinfo");
+		fs.writeFileSync(staleA, "{}");
+		fs.writeFileSync(staleB, "{}");
+
+		// Um arquivo real fora de /tmp — o slug não começa com `_tmp_`,
+		// então a validação dispara a limpeza do cache temporário.
+		const nonTmpPath = path.join(
+			process.cwd(),
+			".cache",
+			"tsc-validator-test-prune",
+			"valid.ts",
+		);
+		fs.mkdirSync(path.dirname(nonTmpPath), { recursive: true });
+		fs.writeFileSync(nonTmpPath, "export const ok: number = 2;\n", "utf-8");
+
+		try {
+			await validateTypeScriptFiles([nonTmpPath]);
+
+			expect(fs.existsSync(staleA)).toBe(false);
+			expect(fs.existsSync(staleB)).toBe(false);
+		} finally {
+			fs.rmSync(path.dirname(nonTmpPath), { recursive: true, force: true });
+			fs.rmSync(staleA, { force: true });
+			fs.rmSync(staleB, { force: true });
+		}
+	});
 });
