@@ -1,19 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import {
-	realToCents,
-	centsToReal,
-	centsToRealStr,
-	desmascararDoc,
-} from "#/modules/atacado/translators/money";
+import { realToCents, centsToReal, desmascararDoc } from "#/modules/atacado/translators/money";
 import { parceiroToDomain } from "#/modules/atacado/translators/parceiro";
 import { clienteToDomain } from "#/modules/atacado/translators/cliente";
 import { faturaToCreate, faturaToDomain } from "#/modules/atacado/translators/fatura";
-import {
-	cobrancaToCreate,
-	cobrancaToDomain,
-	montarDescricaoCobranca,
-	mesDeDataReferencia,
-} from "#/modules/atacado/translators/cobranca";
+import { cobrancaToCreate, cobrancaToDomain } from "#/modules/atacado/translators/cobranca";
 import { notaToCreate, notaToDomain } from "#/modules/atacado/translators/nota";
 import { itemToCreate, itemToDomain } from "#/modules/atacado/translators/item";
 
@@ -54,13 +44,6 @@ describe("translators/money", () => {
 		for (const c of [0, 1, 99, 100, 12345, 99999]) {
 			expect(realToCents(centsToReal(c))).toBe(c);
 		}
-	});
-
-	it("centsToRealStr formata centavos como pt-BR sem separador de milhar", () => {
-		expect(centsToRealStr(12345)).toBe("123,45");
-		expect(centsToRealStr(0)).toBe("0,00");
-		expect(centsToRealStr(9990)).toBe("99,90");
-		expect(centsToRealStr(123456)).toBe("1234,56");
 	});
 });
 
@@ -272,36 +255,6 @@ describe("translators/cobranca", () => {
 			f_status: "a-emitir",
 			f_data_vencimento: "2026-09-10",
 		});
-	});
-
-	it("montarDescricaoCobranca lista itens com quantidade/total + referência de mês", () => {
-		const itens = [
-			{ quantidade: 2, descricao: "Voz Empresarial", total: 9990 },
-			{ quantidade: 1, descricao: "Internet Dedicada", total: 19990 },
-		];
-		expect(montarDescricaoCobranca(itens as never, "2026-08-01")).toBe(
-			"2x Voz Empresarial = R$ 99,90\n1x Internet Dedicada = R$ 199,90\nAgo/2026",
-		);
-	});
-
-	it("montarDescricaoCobranca agrega itens de todas as notas da cobrança", () => {
-		const itensNota1 = [{ quantidade: 1, descricao: "A", total: 1000 }];
-		const itensNota2 = [{ quantidade: 3, descricao: "B", total: 3000 }];
-		const descricao = montarDescricaoCobranca(
-			[...itensNota1, ...itensNota2] as never,
-			"2026-12-01",
-		);
-		expect(descricao).toBe("1x A = R$ 10,00\n3x B = R$ 30,00\nDez/2026");
-	});
-
-	it("mesDeDataReferencia formata YYYY-MM → abreviação pt-BR do mês", () => {
-		expect(mesDeDataReferencia("2026-01-01")).toBe("Jan/2026");
-		expect(mesDeDataReferencia("2026-08-01")).toBe("Ago/2026");
-		expect(mesDeDataReferencia("2026-12-01")).toBe("Dez/2026");
-	});
-
-	it("mesDeDataReferencia lança para data inválida", () => {
-		expect(() => mesDeDataReferencia("invalida")).toThrow();
 	});
 
 	it("cobrancaToDomain mapeia f_* → Cobranca com notas", () => {

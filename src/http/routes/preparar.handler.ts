@@ -12,7 +12,7 @@
  * tipoFaturamento no enum).
  */
 import { calcularFatura } from "#/domain/fatura/calculo";
-import { montarDescricaoCobranca } from "#/modules/atacado/translators/cobranca";
+import { montarDescricaoCobranca } from "#/domain/fatura/descricao";
 import { normalizarDataReferencia } from "#/domain/fatura/normalizacao";
 import {
 	validarDocumentos,
