@@ -45,4 +45,11 @@ describe("calcularDataVencimento", () => {
 	it("clampa dia 30 em fevereiro (C2): ref 2026-01, dia 30 → 2026-02-28", () => {
 		expect(calcularDataVencimento("2026-01-15", 30)).toBe("2026-02-28");
 	});
+
+	it("lança para dataReferencia inválida (formato não-YYYY-MM-DD)", () => {
+		// Sufixo extra quebra o regex estrito.
+		expect(() => calcularDataVencimento("2026-08-15extra")).toThrow(/inválida/);
+		// Formato brasileiro (dd/mm/aaaa) não é aceito.
+		expect(() => calcularDataVencimento("01/08/2026")).toThrow(/inválida/);
+	});
 });

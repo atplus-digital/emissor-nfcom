@@ -57,9 +57,9 @@ bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
 ### Gate de cobertura (bunfig.toml `coverageThreshold`)
 
 - `bunfig.toml` impõe um piso de cobertura **por arquivo** (Bun 1.3.x aplica
-  `coverageThreshold` por arquivo, mais estrito que a doc). O piso atual e o
-  alvo de estirar para 95% ficam lá. Só se aplica quando `--coverage` roda
-  (`test:coverage`); o `bun run test` comum NÃO aplica o gate.
+  `coverageThreshold` por arquivo, mais estrito que a doc). Piso atual: **95%**
+  (linhas e funções). Só se aplica quando `--coverage` roda (`test:coverage`);
+  o `bun run test` comum NÃO aplica o gate.
 - **`test:coverage` exige Redis local** — sem ele os testes de integração do
   Flow skipIf e o wiring dos workers sai do denominador → o gate falha (por
   design, evita false pass). Sobe o Redis com

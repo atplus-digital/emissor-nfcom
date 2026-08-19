@@ -83,3 +83,40 @@ describe("GET /faturas/:id/emissao", () => {
 		expect(res.status).toBe(404);
 	});
 });
+
+/** POST /faturas/:id/emitir — validação do id (SPEC-0001). */
+describe("POST /faturas/:id/emitir — id inválido", () => {
+	test("id não-inteiro (abc) → 422 VALIDACAO 'id inválido'", async () => {
+		const app = criarFaturasRoutes({
+			atacado: fakeAtacado(),
+			queue: fakeQueue(),
+		});
+		const res = await app.request("/faturas/abc/emitir", { method: "POST" });
+		expect(res.status).toBe(422);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("VALIDACAO");
+		expect(body.erro.mensagem).toMatch(/id inválido/);
+	});
+
+	test("id <= 0 (0) → 422 VALIDACAO 'id inválido'", async () => {
+		const app = criarFaturasRoutes({
+			atacado: fakeAtacado(),
+			queue: fakeQueue(),
+		});
+		const res = await app.request("/faturas/0/emitir", { method: "POST" });
+		expect(res.status).toBe(422);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("VALIDACAO");
+	});
+
+	test("id <= 0 (-1) → 422 VALIDACAO 'id inválido'", async () => {
+		const app = criarFaturasRoutes({
+			atacado: fakeAtacado(),
+			queue: fakeQueue(),
+		});
+		const res = await app.request("/faturas/-1/emitir", { method: "POST" });
+		expect(res.status).toBe(422);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("VALIDACAO");
+	});
+});

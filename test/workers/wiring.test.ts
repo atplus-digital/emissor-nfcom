@@ -11,6 +11,7 @@
  */
 import { describe, expect, test, afterAll, mock } from "bun:test";
 import { JOB_NAMES, QUEUE_NAMES } from "#/lib/queue-names";
+import { enqueueOutbox } from "#/lib/db/outbox";
 
 // Env mockada ANTES de qualquer módulo que toque `#/env` (imports estáticos são
 // hoisted; os módulos que usam env são importados dinâmicos DEPOIS deste mock).
@@ -173,6 +174,62 @@ describe("wiring outbox — criarOutboxWorker (Redis real)", () => {
 				const scheduler = await queue.getJobScheduler(JOB_NAMES.OUTBOX_RELAY);
 				expect(scheduler).toBeTruthy();
 				expect(scheduler?.name).toBe(JOB_NAMES.OUTBOX_RELAY);
+			} finally {
+				await worker.close();
+			}
+		},
+	);
+
+	test.skipIf(!redisOk)(
+		"job outbox-relay com entrega falha → catch loga e re-lança (BullMQ marca failed)",
+		{ timeout: 30_000 },
+		async () => {
+			const db = await mkDb();
+			// Atacado fake cujo `atualizarStatusFatura` REJEITA → a entrega da linha
+			// falha → `entregarLinha`/`drenarEEntregar`/`handleOutboxRelay` propagam →
+			// o catch do handler do worker loga e re-lança → BullMQ registra `failed`.
+			const atacado = {
+				atualizarStatusFatura: async () => {
+					throw new Error("Atacado fora (poison)");
+				},
+			} as any;
+
+			// Linha poison no outbox (payload que despacha p/ atualizarStatusFatura).
+			await enqueueOutbox(db, {
+				aggregate: "fatura",
+				aggregateId: 1,
+				payload: { op: "atualizarStatusFatura", id: 1, status: "emitindo" },
+			});
+
+			const { criarOutboxWorker } = await import("#/workers/outbox.worker");
+			const { getQueue } = await import("#/lib/queues");
+
+			const out = criarOutboxWorker({ atacado, db });
+			const worker = await out.worker;
+			const queue = getQueue(QUEUE_NAMES.OUTBOX);
+
+			try {
+				await queue.waitUntilReady();
+				await worker.waitUntilReady();
+
+				// Enfileira um job outbox-relay manual (o repeat job do repair também
+				// dispararia, mas um add explícito garante um jobId rastreável).
+				const job = await queue.add(JOB_NAMES.OUTBOX_RELAY, {});
+				const jobId = job.id!;
+
+				// Espera o job chegar ao estado `failed` (o catch re-lançou → BullMQ
+				// registra a falha; o retry default do WORKER_DEFAULTS não é aplicado
+				// aqui porque o add manual não carrega os opts de retry).
+				let estado: string | undefined;
+				const inicio = Date.now();
+				while (Date.now() - inicio < 15_000) {
+					const j = await queue.getJob(jobId);
+					estado = await j?.getState();
+					if (estado === "failed") break;
+					await new Promise((r) => setTimeout(r, 150));
+				}
+
+				expect(estado, "job outbox-relay deveria terminar em failed").toBe("failed");
 			} finally {
 				await worker.close();
 			}
