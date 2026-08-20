@@ -104,7 +104,7 @@ CRM/Atacado/IXC são **sempre** geradas por `bun run generate:types` para
 de build, não fonte de trabalho.
 
 Ajustes à forma dos tipos (tipagem mais precisa, renomeação, campos de praxe) são
-feitos **no gerador** (`scripts/nocobase/src/pipelines/generate-types/`) — nunca nos
+feitos **no gerador** (`scripts/nocobase/pipelines/generate-types/`) — nunca nos
 arquivos gerados. Ajustes de **domínio** (tradução para tipos próprios) seguem na
 fronteira ADR-0004: os tipos gerados são consumidos apenas dentro de
 `modules/<integração>/translators/` e traduzidos para tipos de domínio; o resto do
@@ -131,7 +131,7 @@ app nunca os importa.
 - Nenhuma interface base de tabela do CRM/Atacado/IXC em `src/generated/` é escrita
   ou alterada à mão — só o gerador escreve lá.
 - Toda mudança na forma dos tipos gerados acontece no gerador
-  (`scripts/nocobase/src/pipelines/generate-types/`), nunca no output.
+  (`scripts/nocobase/pipelines/generate-types/`), nunca no output.
 - Tipos gerados são consumidos apenas dentro de `modules/<integração>/translators/`
   (ADR-0004); nunca importados por `src/domain`, `src/workers`, `src/http` etc.
 
@@ -148,8 +148,8 @@ test -d src && (grep -rn "from.*src/generated\|from.*generated/types" src/ --inc
 
 ## Notas
 
-- O comando é `bun run generate:types` → `bun ./scripts/nocobase/src/index.ts`
-  (pipeline `generate-types` em `scripts/nocobase/src/pipelines/generate-types/`).
+- O comando é `bun run generate:types` → `bun ./scripts/nocobase/index.ts`
+  (pipeline `generate-types` em `scripts/nocobase/pipelines/generate-types/`).
 - Se um dia surgir a necessidade de overlay (ex.: campo do CRM que o schema não
   descreve), é ADR novo que estende este — nunca edição manual no gerado.
 - Se `src/generated/` passar a ser regenerado em CI (checagem de drift), a checagem

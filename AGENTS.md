@@ -92,7 +92,7 @@ bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
 - `scripts/docs-check` é **Python** (`#!/usr/bin/env python3`), não bun — rodar
   `./scripts/docs-check` direto, não `bun scripts/docs-check`.
 - `packages/generated/` é output do gerador (`bun run generate:types`) — **nunca** editar
-  à mão (ADR-0006); ajustes vivem em `scripts/nocobase/src/pipelines/generate-types/`.
+  à mão (ADR-0006); ajustes vivem em `scripts/nocobase/pipelines/generate-types/`.
 - Monetário no domínio é **centavos inteiros**; o CRM entrega `number` em unidade real
   — conversão só no translator do módulo `atacado` (ADR-0004).
 - Nota tem DOIS campos de status: `f_status_interno` (máquina interna) e `f_situacao`
