@@ -2,7 +2,7 @@
 
 Scripts que buscam schemas e metadados no **NocoBase** (e datasource IXC) e geram artefatos TypeScript em `packages/generated/`. O frontend importa esses arquivos — **não edite `packages/generated/` manualmente**.
 
-Documentação técnica detalhada (pipelines, estágios, convenções para agentes): [`src/AGENTS.md`](src/AGENTS.md) e os `AGENTS.md` em cada pipeline em `src/pipelines/`.
+Documentação técnica detalhada (kernel, pipelines, convenções para agentes): [`src/AGENTS.md`](src/AGENTS.md) e [`pipelines/generate-types/AGENTS.md`](pipelines/generate-types/AGENTS.md).
 
 ## Pré-requisitos
 
@@ -17,47 +17,47 @@ Opcional: `NOCOBASE_APP=<app>` para enviar o header `X-App` (necessário quando 
 
 ## Comandos
 
-| Comando               | O que gera                                              |
-| --------------------- | ------------------------------------------------------- |
-| `pnpm generate`       | Todos os geradores padrão (types)                       |
-| `pnpm generate:types` | Tipos e labels das collections → `packages/generated/types/` |
+| Comando              | O que gera                                                          |
+| -------------------- | ------------------------------------------------------------------- |
+| `bun run generate:types` | Tipos e labels das collections → `packages/generated/types/`      |
 
-Flags diretas no orquestrador:
+Flags aceitas (todas combináveis):
 
 ```bash
-pnpm generate --types          # só tipos
-pnpm generate --all            # todos explicitamente
-pnpm generate --concurrent     # execução paralela
-pnpm generate --diff-debug     # escreve diff unificado temp vs output em .reports/generate-types/diff-debug.txt
+bun run generate:types --types          # só a pipeline de tipos (padrão quando nenhuma flag de pipeline é passada)
+bun run generate:types --all            # todas as pipelines explicitamente
+bun run generate:types --concurrent     # execução paralela das pipelines
+bun run generate:types --skip-validate  # pula validação tsc + biome da saída (não recomendado)
+bun run generate:types --diff-debug     # escreve diff unificado temp vs output em .reports/generate-types/diff-debug.txt
 ```
 
 `--diff-debug` é modo de diagnóstico: quando o pipeline reporta mudança entre gerações consecutivas com a mesma entrada, essa flag grava, para cada arquivo alterado, um diff unificado (`@@ ... @@`) apontando as linhas exatas que diferem. Útil para localizar não-determinismo na geração.
 
-Testes e lint dos scripts: `pnpm test:scripts`, `pnpm biome:scripts`.
+Testes e lint dos scripts: `bun run test`, `bunx biome check scripts/nocobase/src scripts/nocobase/pipelines`.
 
 ## Quando usar
 
-| Situação                                            | Comando               | O que configurar antes                                           |
-| --------------------------------------------------- | --------------------- | ---------------------------------------------------------------- |
-| Campo, enum ou collection alterados no NocoBase/IXC | `pnpm generate:types` | Se for collection nova no subset gerado: `config/datasources.ts` |
+| Situação                                            | Comando              | O que configurar antes                                           |
+| --------------------------------------------------- | -------------------- | ---------------------------------------------------------------- |
+| Campo, enum ou collection alterados no NocoBase/IXC | `bun run generate:types` | Se for collection nova no subset gerado: `config/datasources.ts` |
 
-Após regenerar tipos, rode `pnpm typecheck` (ou o subset de testes afetado) antes de comitar.
+Após regenerar tipos, rode `bun run typecheck` (ou o subset de testes afetado) antes de comitar.
 
-## O que cada pipeline produz
+## O que a pipeline produz
 
 ### Tipos (`generate:types`)
 
 - **Entrada:** schemas das datasources `main` (NocoBase) e `d_db_ixcsoft` (IXC).
 - **Saída:** `packages/generated/types/nocobase/` e `packages/generated/types/d_db_ixcsoft/`.
-- **Config:** [`config/datasources.ts`](config/datasources.ts) — collections incluídas, splits (ex.: `t_pessoas` → PF/PJ), dependentes.
-- **Uso no app:** interfaces (`Pessoas`, `Cliente`, …), `*_LABELS`, `TABLE_NAME` / `TABLE_LABEL` em `schemas.ts`.
+- **Config:** [`config/datasources.ts`](config/datasources.ts) — collections incluídas, splits (pasta própria por collection), dependentes.
+- **Uso no app:** interfaces (`Clientes`, `PlanosDeServico`, …), `*_LABELS`, `TABLE_NAME` / `TABLE_LABEL` em `schemas.ts`.
 
 ## Fluxo interno (resumo)
 
-1. Busca dados no NocoBase (quando aplicável).
+1. Bloqueia o workspace (lock) e busca schemas nas datasources (paralelo).
 2. Gera arquivos em diretório temporário (`.temp/`).
-3. Valida com TypeScript e Biome.
-4. Compara diff; em sucesso, substitui `packages/generated/`.
+3. Compara diff temp vs output vigente.
+4. Valida a saída gerada (tsc + biome) e, se houve mudança, substitui `packages/generated/`.
 
 ## Regras
 
@@ -71,12 +71,17 @@ Após regenerar tipos, rode `pnpm typecheck` (ou o subset de testes afetado) ant
 ```
 scripts/nocobase/
 ├── README.md                 # este arquivo
+├── index.ts                  # entry CLI (`bun run generate:types`)
 ├── config/
-│   └── datasources.ts        # collections para generate:types
-└── src/
-    ├── index.ts              # orquestrador (pnpm generate)
-    ├── generator-registry.ts
-    ├── lib/                  # lifecycle, HTTP, validação
-    └── pipelines/
-        └── generate-types/
+│   └── datasources.ts        # datasources/collections da pipeline de tipos
+├── src/                      # kernel compartilhado (nada de pipeline específica aqui)
+│   ├── cli/                  # saída CLI, flags de runtime, config do listr
+│   ├── http/                 # http-client genérico + NocoBaseApiClient
+│   ├── io/                   # atomic writer/diff, locker, diff-debug
+│   ├── lifecycle/            # lock → pipeline → diff → validar → swap
+│   ├── pipeline/             # runner de estágios Listr2 (GeneratorPipeline)
+│   ├── utils/                # args, env, strings
+│   └── validation/           # tsc-validator, linter-runner (biome)
+└── pipelines/
+    └── generate-types/       # pipeline de geração de tipos (stages, content, utils, @types, test)
 ```

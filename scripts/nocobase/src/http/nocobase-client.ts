@@ -1,4 +1,4 @@
-import { fetchJsonWithAuth } from "@shared/http/http-client";
+import { fetchJsonWithAuth } from "@generators/http/http-client";
 
 export interface NocoBaseApiCredentials {
 	baseUrl: string;
@@ -10,12 +10,12 @@ export interface NocoBaseApiClientOptions {
 	requestHeaders?: Record<string, string>;
 }
 
-interface FetchPageResult<T> {
-	entries: T[];
-	hasNextPage: boolean;
-}
-
-export abstract class NocoBaseApiClient {
+/**
+ * Concrete client for the NocoBase REST API. All datasources of an
+ * instance (e.g. `main`, `d_db_ixcsoft`) are served by the same class —
+ * the datasource key is a path parameter, not a different client.
+ */
+export class NocoBaseApiClient {
 	public readonly baseUrl: string;
 
 	private readonly token: string;
@@ -24,7 +24,7 @@ export abstract class NocoBaseApiClient {
 
 	private readonly requestHeaders?: Record<string, string>;
 
-	protected constructor(
+	constructor(
 		credentials: NocoBaseApiCredentials,
 		options?: NocoBaseApiClientOptions,
 	) {
@@ -34,49 +34,19 @@ export abstract class NocoBaseApiClient {
 		this.requestHeaders = options?.requestHeaders;
 	}
 
-	protected async fetchJson<T>(
-		resourcePath: string,
-		mapHttpError?: (params: {
-			status: number;
-			statusText: string;
-			url: string;
-			bodySuffix: string;
-		}) => Error | undefined,
-	): Promise<T> {
-		return fetchJsonWithAuth<T>(resourcePath, {
+	/**
+	 * Fetch collections (with fields) for a data source. Accepts either the
+	 * raw array or a `{ data: [...] }` wrapped response.
+	 */
+	public async fetchCollections(dataSourceKey: string): Promise<unknown[]> {
+		const response = await fetchJsonWithAuth<
+			unknown[] | { data?: unknown[] | null }
+		>(`dataSources/${dataSourceKey}/collections:list?paginate=false`, {
 			baseUrl: this.baseUrl,
 			token: this.token,
 			timeoutMs: this.timeoutMs,
 			requestHeaders: this.requestHeaders,
-			mapHttpError,
 		});
-	}
-
-	protected async fetchPaginated<T>(options: {
-		pageSize: number;
-		fetchPage: (page: number, pageSize: number) => Promise<FetchPageResult<T>>;
-	}): Promise<T[]> {
-		const allEntries: T[] = [];
-		let page = 1;
-
-		while (true) {
-			const result = await options.fetchPage(page, options.pageSize);
-			allEntries.push(...result.entries);
-
-			if (!result.hasNextPage) {
-				break;
-			}
-
-			page++;
-		}
-
-		return allEntries;
-	}
-
-	protected async fetchCollections(dataSourceKey: string): Promise<unknown[]> {
-		const response = await this.fetchJson<
-			unknown[] | { data?: unknown[] | null }
-		>(`dataSources/${dataSourceKey}/collections:list?paginate=false`);
 
 		if (Array.isArray(response)) {
 			return response;

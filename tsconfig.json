@@ -35,8 +35,7 @@
 			"#/*": ["./apps/backend/src/*"],
 			"@emissor/db/*": ["./packages/db/src/*"],
 			"@generators/*": ["./scripts/nocobase/src/*"],
-			"@shared/types": ["./scripts/nocobase/types.ts"],
-			"@shared/*": ["./scripts/nocobase/src/*"]
+			"@pipelines/*": ["./scripts/nocobase/pipelines/*"]
 		}
 	},
 	"exclude": [
