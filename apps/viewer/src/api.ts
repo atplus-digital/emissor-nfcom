@@ -1,8 +1,15 @@
 import type {
+	ClienteView,
 	EmissaoView,
+	EmitirResultado,
 	FaturaDetalhe,
 	FaturaResumo,
 	FaturasFiltro,
+	FilasSnapshot,
+	ParceiroDetalhe,
+	ParceiroResumo,
+	PrepararInput,
+	PrepararResultado,
 	User,
 } from "./types";
 
@@ -75,10 +82,7 @@ interface LoginResponse {
 	user: User;
 }
 
-export async function login(
-	account: string,
-	password: string,
-): Promise<User> {
+export async function login(account: string, password: string): Promise<User> {
 	const r = await request<LoginResponse>("/api/login", {
 		method: "POST",
 		body: JSON.stringify({ account, password }),
@@ -99,23 +103,69 @@ export async function getSession(): Promise<User> {
 	return r.user;
 }
 
-export async function listFaturas(filtro: FaturasFiltro = {}): Promise<FaturaResumo[]> {
+export async function listFaturas(
+	filtro: FaturasFiltro = {},
+): Promise<FaturaResumo[]> {
 	const params = new URLSearchParams();
 	if (filtro.parceiroId) params.set("parceiroId", filtro.parceiroId);
-	if (filtro.dataReferencia) params.set("dataReferencia", filtro.dataReferencia);
+	if (filtro.dataReferencia)
+		params.set("dataReferencia", filtro.dataReferencia);
 	if (filtro.status) params.set("status", filtro.status);
 	const qs = params.toString();
-	return request<FaturaResumo[]>(
-		`/api/faturas${qs ? `?${qs}` : ""}`,
-	);
+	return request<FaturaResumo[]>(`/api/faturas${qs ? `?${qs}` : ""}`);
 }
 
 export async function getFatura(id: number | string): Promise<FaturaDetalhe> {
-	return request<FaturaDetalhe>(`/api/faturas/${encodeURIComponent(String(id))}`);
+	return request<FaturaDetalhe>(
+		`/api/faturas/${encodeURIComponent(String(id))}`,
+	);
 }
 
 export async function getEmissao(id: number | string): Promise<EmissaoView> {
 	return request<EmissaoView>(
 		`/api/faturas/${encodeURIComponent(String(id))}/emissao`,
+	);
+}
+
+export async function listParceiros(): Promise<ParceiroResumo[]> {
+	return request<ParceiroResumo[]>("/api/parceiros");
+}
+
+export async function getParceiro(
+	id: number | string,
+): Promise<ParceiroDetalhe> {
+	return request<ParceiroDetalhe>(
+		`/api/parceiros/${encodeURIComponent(String(id))}`,
+	);
+}
+
+export async function listClientes(
+	parceiroId: number | string,
+): Promise<ClienteView[]> {
+	return request<ClienteView[]>(
+		`/api/parceiros/${encodeURIComponent(String(parceiroId))}/clientes`,
+	);
+}
+
+export async function prepararFatura(
+	input: PrepararInput,
+): Promise<PrepararResultado> {
+	return request<PrepararResultado>("/api/faturas/preparar", {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
+}
+
+/** Snapshot das filas BullMQ (o viewer faz poll para "tempo real"). */
+export async function listFilas(): Promise<FilasSnapshot> {
+	return request<FilasSnapshot>("/api/filas");
+}
+
+export async function emitirFatura(
+	id: number | string,
+): Promise<EmitirResultado> {
+	return request<EmitirResultado>(
+		`/api/faturas/${encodeURIComponent(String(id))}/emitir`,
+		{ method: "POST" },
 	);
 }

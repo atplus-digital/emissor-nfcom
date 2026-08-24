@@ -2,6 +2,16 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError, login } from "../api";
 import { useAuth } from "../components/Layout";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+	Card,
+	CardContent,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export function Login() {
 	const [account, setAccount] = useState("");
@@ -31,40 +41,53 @@ export function Login() {
 	};
 
 	return (
-		<div className="login-wrap">
-			<form className="login-card" onSubmit={(e) => void onSubmit(e)}>
-				<h1>Emissor NFCom</h1>
-				<p className="muted">Acesse o painel de faturas e notas</p>
-				{erro && (
-					<div className="alert alert-error" role="alert">
-						{erro}
-					</div>
-				)}
-				<label>
-					<span>Conta</span>
-					<input
-						type="text"
-						value={account}
-						onChange={(e) => setAccount(e.target.value)}
-						autoComplete="username"
-						required
-						autoFocus
-					/>
-				</label>
-				<label>
-					<span>Senha</span>
-					<input
-						type="password"
-						value={password}
-						onChange={(e) => setPassword(e.target.value)}
-						autoComplete="current-password"
-						required
-					/>
-				</label>
-				<button className="btn btn-primary" disabled={carregando}>
-					{carregando ? "Entrando…" : "Entrar"}
-				</button>
-			</form>
+		<div className="flex min-h-screen items-center justify-center p-4">
+			<Card className="w-full max-w-[380px]">
+				<CardHeader>
+					<CardTitle className="text-xl">Emissor NFCom</CardTitle>
+				</CardHeader>
+				<CardContent>
+					<form
+						className="flex flex-col gap-4"
+						onSubmit={(e) => void onSubmit(e)}
+					>
+						<p className="text-sm text-muted-foreground">
+							Acesse o painel de faturas e notas
+						</p>
+						{erro && (
+							<Alert variant="destructive">
+								<AlertDescription>{erro}</AlertDescription>
+							</Alert>
+						)}
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="account">Conta</Label>
+							<Input
+								id="account"
+								type="text"
+								value={account}
+								onChange={(e) => setAccount(e.target.value)}
+								autoComplete="username"
+								required
+								autoFocus
+							/>
+						</div>
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="password">Senha</Label>
+							<Input
+								id="password"
+								type="password"
+								value={password}
+								onChange={(e) => setPassword(e.target.value)}
+								autoComplete="current-password"
+								required
+							/>
+						</div>
+						<Button className="w-full" disabled={carregando}>
+							{carregando ? "Entrando…" : "Entrar"}
+						</Button>
+					</form>
+				</CardContent>
+			</Card>
 		</div>
 	);
 }

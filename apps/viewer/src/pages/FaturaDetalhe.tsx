@@ -1,7 +1,33 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ApiError, getEmissao, getFatura } from "../api";
-import { Money, MoneyReais } from "../components/Money";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+	AlertDialog,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import {
+	ApiError,
+	emitirFatura,
+	getEmissao,
+	getFatura,
+	getParceiro,
+} from "../api";
+import { MoneyReais } from "../components/Money";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatAliq, formatData, formatQtd } from "../format";
 import type {
@@ -26,13 +52,23 @@ export function FaturaDetalhe() {
 	});
 	const [carregando, setCarregando] = useState(true);
 	const [erroEmissao, setErroEmissao] = useState<string | null>(null);
+	// Emissão da fatura (disparo assíncrono via POST /emitir, com confirmação).
+	const [dialogEmissao, setDialogEmissao] = useState(false);
+	const [emitindo, setEmitindo] = useState(false);
+	const [erroEmitir, setErroEmitir] = useState<string | null>(null);
+	// Nome do parceiro (complementar — falha não derruba o detalhe).
+	const [parceiroNome, setParceiroNome] = useState<string | null>(null);
 
 	const carregar = useCallback(async () => {
 		if (!id) return;
 		setCarregando(true);
 		setErroEmissao(null);
+		setParceiroNome(null);
 		try {
 			const fatura = await getFatura(id);
+			// Nome do parceiro é complementar — falha não derruba o detalhe.
+			const parceiro = await getParceiro(fatura.parceiroId).catch(() => null);
+			setParceiroNome(parceiro ? parceiro.razaoSocial : null);
 			// Emissão é complementar — falha nela não derruba o detalhe.
 			const emissao = await getEmissao(id).catch((err: unknown) => {
 				setErroEmissao(
@@ -61,16 +97,36 @@ export function FaturaDetalhe() {
 		void carregar();
 	}, [carregar]);
 
-	if (carregando) return <p className="muted">Carregando…</p>;
+	const onConfirmarEmissao = useCallback(async () => {
+		if (!id || emitindo) return;
+		setErroEmitir(null);
+		setEmitindo(true);
+		try {
+			await emitirFatura(id);
+			setDialogEmissao(false);
+			// Atualiza o detalhe — a seção de emissão passa a refletir o job.
+			await carregar();
+		} catch (err) {
+			setErroEmitir(
+				err instanceof ApiError
+					? err.mensagem
+					: "Erro inesperado ao emitir a fatura.",
+			);
+		} finally {
+			setEmitindo(false);
+		}
+	}, [carregar, emitindo, id]);
+
+	if (carregando) return <p className="text-muted-foreground">Carregando…</p>;
 	if (estado.erro)
 		return (
 			<>
-				<div className="alert alert-error" role="alert">
-					{estado.erro}
-				</div>
-				<Link className="btn btn-ghost" to="/">
-					← Voltar para faturas
-				</Link>
+				<Alert variant="destructive">
+					<AlertDescription>{estado.erro}</AlertDescription>
+				</Alert>
+				<Button asChild variant="ghost">
+					<Link to="/">← Voltar para faturas</Link>
+				</Button>
 			</>
 		);
 
@@ -79,61 +135,141 @@ export function FaturaDetalhe() {
 
 	return (
 		<div>
-			<Link className="btn btn-ghost" to="/">
-				← Voltar para faturas
-			</Link>
+			<Button asChild variant="ghost">
+				<Link to="/">← Voltar para faturas</Link>
+			</Button>
 
-			<section className="card">
-				<div className="card-header">
-					<h1>Fatura {fatura.id}</h1>
+			<Card className="mb-4">
+				<CardHeader>
+					<CardTitle>Fatura {fatura.id}</CardTitle>
 					<StatusBadge escopo="fatura" value={fatura.status} />
-				</div>
-				<dl className="kv">
-					<div>
-						<dt>Parceiro</dt>
-						<dd>{fatura.parceiroId}</dd>
-					</div>
-					<div>
-						<dt>Referência</dt>
-						<dd>{formatData(fatura.dataReferencia)}</dd>
-					</div>
-					<div>
-						<dt>Vencimento</dt>
-						<dd>{formatData(fatura.dataVencimento)}</dd>
-					</div>
-					<div>
-						<dt>Tipo</dt>
-						<dd>{fatura.tipoFaturamento}</dd>
-					</div>
-					<div>
-						<dt>Valor total</dt>
-						<dd>
-							<MoneyReais value={fatura.valorTotal} />
-						</dd>
-					</div>
-					<div>
-						<dt>Cobranças</dt>
-						<dd>{(fatura.cobrancas ?? []).length}</dd>
-					</div>
-				</dl>
-			</section>
+				</CardHeader>
+				<CardContent>
+					<dl className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-6 gap-y-2.5">
+						<div>
+							<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+								Parceiro
+							</dt>
+							<dd className="font-medium mb-1">
+								{parceiroNome
+									? `${parceiroNome} (${fatura.parceiroId})`
+									: fatura.parceiroId}
+							</dd>
+						</div>
+						<div>
+							<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+								Referência
+							</dt>
+							<dd className="font-medium mb-1">
+								{formatData(fatura.dataReferencia)}
+							</dd>
+						</div>
+						<div>
+							<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+								Vencimento
+							</dt>
+							<dd className="font-medium mb-1">
+								{formatData(fatura.dataVencimento)}
+							</dd>
+						</div>
+						<div>
+							<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+								Tipo
+							</dt>
+							<dd className="font-medium mb-1">{fatura.tipoFaturamento}</dd>
+						</div>
+						<div>
+							<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+								Valor total
+							</dt>
+							<dd className="font-medium mb-1">
+								<MoneyReais value={fatura.valorTotal} />
+							</dd>
+						</div>
+						<div>
+							<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+								Cobranças
+							</dt>
+							<dd className="font-medium mb-1">
+								{(fatura.cobrancas ?? []).length}
+							</dd>
+						</div>
+					</dl>
+				</CardContent>
+			</Card>
 
-			<h2>Cobranças</h2>
+			{fatura.status === "a-emitir" && (
+				<Card className="mb-4">
+					<CardHeader>
+						<CardTitle className="text-base">Emitir fatura</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<div className="flex items-center justify-between gap-4 flex-wrap">
+							<p className="text-sm text-muted-foreground">
+								A fatura está preparada. Ao confirmar, as notas serão enviadas
+								para emissão (processamento assíncrono).
+							</p>
+							<Button
+								disabled={emitindo}
+								onClick={() => setDialogEmissao(true)}
+							>
+								Emitir fatura
+							</Button>
+						</div>
+						{erroEmitir && (
+							<Alert variant="destructive" className="mt-3">
+								<AlertDescription>{erroEmitir}</AlertDescription>
+							</Alert>
+						)}
+					</CardContent>
+				</Card>
+			)}
+
+			<AlertDialog
+				open={dialogEmissao}
+				onOpenChange={(aberto) => {
+					if (!emitindo) setDialogEmissao(aberto);
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Confirmar emissão</AlertDialogTitle>
+						<AlertDialogDescription>
+							Isto envia as notas da fatura {fatura.id} para emissão via SEFAZ.
+							A ação é assíncrona — o status atualiza aqui mesmo, na seção de
+							emissão.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={emitindo}>Cancelar</AlertDialogCancel>
+						<Button
+							disabled={emitindo}
+							onClick={() => void onConfirmarEmissao()}
+						>
+							{emitindo ? "Enviando…" : "Confirmar emissão"}
+						</Button>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<h2 className="text-[1.15rem] mt-7 mb-3">Cobranças</h2>
 			{(fatura.cobrancas ?? []).length === 0 && (
-				<p className="muted">Esta fatura não possui cobranças.</p>
+				<p className="text-muted-foreground">
+					Esta fatura não possui cobranças.
+				</p>
 			)}
 			{(fatura.cobrancas ?? []).map((c) => (
 				<Cobranca key={c.id} cobranca={c} />
 			))}
 
-			<h2>Emissão</h2>
+			<h2 className="text-[1.15rem] mt-7 mb-3">Emissão</h2>
 			{estado.emissao === null ? (
 				erroEmissao ? (
-					<div className="alert alert-error" role="alert">
-						{erroEmissao}
-					</div>
+					<Alert variant="destructive">
+						<AlertDescription>{erroEmissao}</AlertDescription>
+					</Alert>
 				) : (
-					<p className="muted">Emissão indisponível.</p>
+					<p className="text-muted-foreground">Emissão indisponível.</p>
 				)
 			) : (
 				<SecaoEmissao emissao={estado.emissao} />
@@ -144,130 +280,164 @@ export function FaturaDetalhe() {
 
 function Cobranca({ cobranca }: { cobranca: CobrancaView }) {
 	return (
-		<section className="card">
-			<div className="card-header">
-				<h3>Cobrança {cobranca.id}</h3>
+		<Card className="mb-4">
+			<CardHeader>
+				<CardTitle className="text-base">Cobrança {cobranca.id}</CardTitle>
 				<StatusBadge escopo="cobranca" value={cobranca.status} />
-			</div>
-			<dl className="kv">
-				<div>
-					<dt>Devedor</dt>
-					<dd>{cobranca.nomeDevedor}</dd>
-				</div>
-				<div>
-					<dt>Documento</dt>
-					<dd>{cobranca.documentoDevedor}</dd>
-				</div>
-				<div>
-					<dt>Vencimento</dt>
-					<dd>{formatData(cobranca.dataVencimento)}</dd>
-				</div>
-				<div>
-					<dt>Valor</dt>
-					<dd>
-						<Money cents={cobranca.valorTotal} />
-					</dd>
-				</div>
-			</dl>
-			{cobranca.boletoUrl && (
-				<span className="badges">
-					<a className="btn btn-small" href={cobranca.boletoUrl} target="_blank" rel="noreferrer">
-						Ver boleto
-					</a>
-					<a className="btn btn-small" href={cobranca.boletoUrl} target="_blank" rel="noreferrer">
-						📄 Fatura Asaas (PDF)
-					</a>
-				</span>
-			)}
+			</CardHeader>
+			<CardContent>
+				<dl className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-6 gap-y-2.5">
+					<div>
+						<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+							Devedor
+						</dt>
+						<dd className="font-medium mb-1">{cobranca.nomeDevedor}</dd>
+					</div>
+					<div>
+						<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+							Documento
+						</dt>
+						<dd className="font-medium mb-1">{cobranca.documentoDevedor}</dd>
+					</div>
+					<div>
+						<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+							Vencimento
+						</dt>
+						<dd className="font-medium mb-1">
+							{formatData(cobranca.dataVencimento)}
+						</dd>
+					</div>
+					<div>
+						<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+							Valor
+						</dt>
+						<dd className="font-medium mb-1">
+							<MoneyReais value={cobranca.valorTotal} />
+						</dd>
+					</div>
+				</dl>
+				{cobranca.boletoUrl && (
+					<div className="flex gap-1.5 flex-wrap">
+						<Button asChild size="sm">
+							<a href={cobranca.boletoUrl} target="_blank" rel="noreferrer">
+								Ver boleto
+							</a>
+						</Button>
+						<Button asChild size="sm">
+							<a href={cobranca.boletoUrl} target="_blank" rel="noreferrer">
+								📄 Fatura Asaas (PDF)
+							</a>
+						</Button>
+					</div>
+				)}
 
-			{(cobranca.notas ?? []).length === 0 ? (
-				<p className="muted">Sem notas nesta cobrança.</p>
-			) : (
-				cobranca.notas?.map((n) => <Nota key={n.id} nota={n} />)
-			)}
-		</section>
+				{(cobranca.notas ?? []).length === 0 ? (
+					<p className="text-muted-foreground">Sem notas nesta cobrança.</p>
+				) : (
+					cobranca.notas?.map((n) => <Nota key={n.id} nota={n} />)
+				)}
+			</CardContent>
+		</Card>
 	);
 }
 
 function Nota({ nota }: { nota: NotaView }) {
 	return (
-		<article className="nota">
-			<div className="card-header">
-				<h4>
+		<article className="border rounded-lg p-4 mt-4 bg-background">
+			<div className="flex items-center justify-between gap-4 flex-wrap mb-3">
+				<h4 className="text-[0.95rem]">
 					Nota {nota.numero}
 					{nota.serie ? ` — série ${nota.serie}` : ""} · {nota.nome}
 				</h4>
-				<span className="badges">
+				<div className="flex gap-1.5 flex-wrap">
 					<StatusBadge escopo="nota" value={nota.statusInterno} />
 					<StatusBadge escopo="situacao" value={nota.situacao} />
 					{nota.pdfUrl && (
-						<a className="btn btn-small" href={nota.pdfUrl} target="_blank" rel="noreferrer">
-							📄 Ver PDF
-						</a>
+						<Button asChild size="sm">
+							<a href={nota.pdfUrl} target="_blank" rel="noreferrer">
+								📄 Ver PDF
+							</a>
+						</Button>
 					)}
-				</span>
+				</div>
 			</div>
-			<dl className="kv">
+			<dl className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-6 gap-y-2.5">
 				<div>
-					<dt>CPF/CNPJ</dt>
-					<dd>{nota.cpfcnpj}</dd>
+					<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+						CPF/CNPJ
+					</dt>
+					<dd className="font-medium mb-1">{nota.cpfcnpj}</dd>
 				</div>
 				<div>
-					<dt>Chave</dt>
-					<dd className="mono wrap">{nota.chave || "—"}</dd>
+					<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+						Chave
+					</dt>
+					<dd className="font-mono text-[0.82em] break-all [overflow-wrap:anywhere]">
+						{nota.chave || "—"}
+					</dd>
 				</div>
 				<div>
-					<dt>Protocolo</dt>
-					<dd className="wrap">{nota.protocolo || "—"}</dd>
+					<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+						Protocolo
+					</dt>
+					<dd className="break-all [overflow-wrap:anywhere]">
+						{nota.protocolo || "—"}
+					</dd>
 				</div>
 				<div>
-					<dt>Total</dt>
-					<dd>
-						<Money cents={nota.total} />
+					<dt className="text-xs uppercase tracking-wide text-muted-foreground">
+						Total
+					</dt>
+					<dd className="font-medium mb-1">
+						<MoneyReais value={nota.total} />
 					</dd>
 				</div>
 			</dl>
 
 			{(nota.itens ?? []).length > 0 && (
-				<div className="table-wrap">
-					<table className="table-sm">
-						<thead>
-							<tr>
-								<th>Item</th>
-								<th>Código</th>
-								<th>Descrição</th>
-								<th>CFOP</th>
-								<th>CClass</th>
-								<th>Qtd</th>
-								<th>Unitário</th>
-								<th>Total</th>
-								<th>Alíq. ICMS</th>
-								<th>ICMS</th>
-							</tr>
-						</thead>
-						<tbody>
+				<div className="overflow-x-auto max-w-full border rounded-lg bg-card mt-3">
+					<Table className="text-sm">
+						<TableHeader>
+							<TableRow>
+								<TableHead>Item</TableHead>
+								<TableHead>Código</TableHead>
+								<TableHead>Descrição</TableHead>
+								<TableHead>CFOP</TableHead>
+								<TableHead>CClass</TableHead>
+								<TableHead>Qtd</TableHead>
+								<TableHead className="text-right">Unitário</TableHead>
+								<TableHead className="text-right">Total</TableHead>
+								<TableHead className="text-right">Alíq. ICMS</TableHead>
+								<TableHead className="text-right">ICMS</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
 							{(nota.itens ?? []).map((i, idx) => (
-								<tr key={`${i.item}-${idx}`}>
-									<td>{i.item}</td>
-									<td>{i.codigo || "—"}</td>
-									<td>{i.descricao}</td>
-									<td>{i.cfop}</td>
-									<td>{i.cclass}</td>
-									<td className="num">{formatQtd(i.quantidade)}</td>
-									<td className="num">
-										<Money cents={i.unitario} />
-									</td>
-									<td className="num">
-										<Money cents={i.total} />
-									</td>
-									<td className="num">{formatAliq(i.aliqIcms)}</td>
-									<td className="num">
-										<Money cents={i.icms} />
-									</td>
-								</tr>
+								<TableRow key={`${i.item}-${idx}`}>
+									<TableCell>{i.item}</TableCell>
+									<TableCell>{i.codigo || "—"}</TableCell>
+									<TableCell>{i.descricao}</TableCell>
+									<TableCell>{i.cfop}</TableCell>
+									<TableCell>{i.cclass}</TableCell>
+									<TableCell className="text-right tabular-nums">
+										{formatQtd(i.quantidade)}
+									</TableCell>
+									<TableCell className="text-right tabular-nums">
+										<MoneyReais value={i.unitario} />
+									</TableCell>
+									<TableCell className="text-right tabular-nums">
+										<MoneyReais value={i.total} />
+									</TableCell>
+									<TableCell className="text-right tabular-nums">
+										{formatAliq(i.aliqIcms)}
+									</TableCell>
+									<TableCell className="text-right tabular-nums">
+										<MoneyReais value={i.icms} />
+									</TableCell>
+								</TableRow>
 							))}
-						</tbody>
-					</table>
+						</TableBody>
+					</Table>
 				</div>
 			)}
 		</article>
@@ -276,88 +446,98 @@ function Nota({ nota }: { nota: NotaView }) {
 
 function SecaoEmissao({ emissao }: { emissao: EmissaoView }) {
 	return (
-		<section className="card">
-			<div className="card-header">
-				<h3>Status da emissão</h3>
+		<Card className="mb-4">
+			<CardHeader>
+				<CardTitle className="text-base">Status da emissão</CardTitle>
 				<StatusBadge escopo="fatura" value={emissao.status} />
-			</div>
+			</CardHeader>
+			<CardContent>
+				<div className="overflow-x-auto max-w-full border rounded-lg bg-card">
+					<Table className="text-sm">
+						<TableHeader>
+							<TableRow>
+								<TableHead>Cobrança</TableHead>
+								<TableHead>Status</TableHead>
+								<TableHead>Nota</TableHead>
+								<TableHead>Situação SEFAZ</TableHead>
+								<TableHead>Chave</TableHead>
+								<TableHead>Protocolo</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{(emissao.cobrancas ?? []).flatMap((c) =>
+								(c.notas ?? []).length === 0
+									? [
+											<TableRow key={`c${c.id}`}>
+												<TableCell>{c.id}</TableCell>
+												<TableCell>
+													<StatusBadge escopo="cobranca" value={c.status} />
+												</TableCell>
+												<TableCell
+													className="text-muted-foreground"
+													colSpan={4}
+												>
+													Sem notas
+												</TableCell>
+											</TableRow>,
+										]
+									: (c.notas ?? []).map((n) => (
+											<TableRow key={`c${c.id}-n${n.id}`}>
+												<TableCell>{c.id}</TableCell>
+												<TableCell>
+													<StatusBadge escopo="cobranca" value={c.status} />
+												</TableCell>
+												<TableCell>{n.id}</TableCell>
+												<TableCell>
+													<StatusBadge escopo="situacao" value={n.situacao} />
+												</TableCell>
+												<TableCell className="font-mono text-[0.82em] break-all [overflow-wrap:anywhere]">
+													{n.chave || "—"}
+												</TableCell>
+												<TableCell className="font-mono text-[0.82em] break-all [overflow-wrap:anywhere]">
+													{n.protocolo || "—"}
+												</TableCell>
+											</TableRow>
+										)),
+							)}
+						</TableBody>
+					</Table>
+				</div>
 
-			<div className="table-wrap">
-				<table className="table-sm">
-					<thead>
-						<tr>
-							<th>Cobrança</th>
-							<th>Status</th>
-							<th>Nota</th>
-							<th>Situação SEFAZ</th>
-							<th>Chave</th>
-							<th>Protocolo</th>
-						</tr>
-					</thead>
-					<tbody>
-						{(emissao.cobrancas ?? []).flatMap((c) =>
-							(c.notas ?? []).length === 0
-								? [
-										<tr key={`c${c.id}`}>
-											<td>{c.id}</td>
-											<td>
-												<StatusBadge escopo="cobranca" value={c.status} />
-											</td>
-											<td className="muted" colSpan={4}>
-												Sem notas
-											</td>
-										</tr>,
-									]
-								: (c.notas ?? []).map((n) => (
-										<tr key={`c${c.id}-n${n.id}`}>
-											<td>{c.id}</td>
-											<td>
-												<StatusBadge escopo="cobranca" value={c.status} />
-											</td>
-											<td>{n.id}</td>
-											<td>
-												<StatusBadge escopo="situacao" value={n.situacao} />
-											</td>
-											<td className="mono wrap">{n.chave || "—"}</td>
-											<td className="mono wrap">{n.protocolo || "—"}</td>
-										</tr>
-									)),
-						)}
-					</tbody>
-				</table>
-			</div>
-
-			{(emissao.erros ?? []).length > 0 ? (
-				<>
-					<h4>Erros</h4>
-					<div className="table-wrap">
-						<table>
-							<thead>
-								<tr>
-									<th>Erro</th>
-									<th>Cobrança</th>
-									<th>Nota</th>
-									<th>Status HTTP</th>
-									<th>Mensagem</th>
-								</tr>
-							</thead>
-							<tbody>
-								{(emissao.erros ?? []).map((e) => (
-									<tr key={e.id}>
-										<td>{e.erro}</td>
-										<td>{e.cobrancaId}</td>
-										<td>{e.notaId}</td>
-										<td className="num">{e.statusCode}</td>
-										<td>{e.mensagem}</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				</>
-			) : (
-				<p className="muted">Nenhum erro registrado.</p>
-			)}
-		</section>
+				{(emissao.erros ?? []).length > 0 ? (
+					<>
+						<h4 className="text-[0.95rem] mt-4 mb-3">Erros</h4>
+						<div className="overflow-x-auto max-w-full border rounded-lg bg-card">
+							<Table>
+								<TableHeader>
+									<TableRow>
+										<TableHead>Erro</TableHead>
+										<TableHead>Cobrança</TableHead>
+										<TableHead>Nota</TableHead>
+										<TableHead>Status HTTP</TableHead>
+										<TableHead>Mensagem</TableHead>
+									</TableRow>
+								</TableHeader>
+								<TableBody>
+									{(emissao.erros ?? []).map((e) => (
+										<TableRow key={e.id}>
+											<TableCell>{e.erro}</TableCell>
+											<TableCell>{e.cobrancaId}</TableCell>
+											<TableCell>{e.notaId}</TableCell>
+											<TableCell className="text-right tabular-nums">
+												{e.statusCode}
+											</TableCell>
+											<TableCell>{e.mensagem}</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</div>
+					</>
+				) : (
+					<p className="text-muted-foreground mt-3">Nenhum erro registrado.</p>
+				)}
+			</CardContent>
+		</Card>
 	);
 }

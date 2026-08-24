@@ -24,9 +24,30 @@ export function formatData(iso: string | null | undefined): string {
 	return `${d}/${m}/${y}`;
 }
 
+/** Formata ms epoch como HH:MM:SS (pt-BR). */
+export function formatHora(ms: number | null | undefined): string {
+	if (ms == null) return "—";
+	return new Date(ms).toLocaleTimeString("pt-BR");
+}
+
+/** Formata ms epoch como dd/mm/aaaa HH:MM:SS (pt-BR). */
+export function formatDataHora(ms: number | null | undefined): string {
+	if (ms == null) return "—";
+	return new Date(ms).toLocaleString("pt-BR", {
+		day: "2-digit",
+		month: "2-digit",
+		year: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit",
+	});
+}
+
 /** Formata quantidade (pode ser decimal no CRM). */
 export function formatQtd(qtd: number): string {
-	return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 4 }).format(qtd);
+	return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 4 }).format(
+		qtd,
+	);
 }
 
 /** Formata alíquota em % (ex.: 0.18 → 18%). */
