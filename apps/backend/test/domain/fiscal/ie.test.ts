@@ -25,6 +25,11 @@ describe("normalizarIE (fronteira fiscal — Defeito B)", () => {
 		it("undefined → undefined", () => {
 			expect(normalizarIE(undefined)).toBeUndefined();
 		});
+		it("null → undefined (NocoBase envia f_ie null quando ausente)", () => {
+			// Regressão: TypeError `null is not an object (evaluating 'ie.trim')`
+			// quando o CRM entrega `f_ie: null` (não undefined).
+			expect(normalizarIE(null)).toBeUndefined();
+		});
 		it("valor não numérico arbitrário → undefined", () => {
 			expect(normalizarIE("NAO-CADB")).toBeUndefined();
 			expect(normalizarIE("12.345")).toBeUndefined();

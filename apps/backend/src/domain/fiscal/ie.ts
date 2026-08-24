@@ -17,8 +17,8 @@
  * tratado como IE válida (aceitamos o numérico; a validação de dígito
  * verificador da IE é do SEFAZ, não da fronteira).
  */
-export function normalizarIE(ie: string | undefined): string | undefined {
-	if (ie === undefined) return undefined;
+export function normalizarIE(ie: string | null | undefined): string | undefined {
+	if (ie === undefined || ie === null) return undefined;
 	const limpa = ie.trim();
 	if (limpa === "") return undefined;
 	if (limpa.toUpperCase() === "ISENTO") return undefined;
