@@ -48,6 +48,15 @@ services:
       - ./:/app
       # Preserva o node_modules da imagem (bind mount não o sobrescreve).
       - /app/node_modules
+      # Volumes anônimos p/ cada sub-workspace: com `linker = "hoisted"`
+      # (bunfig.toml) a maior parte das deps vive na raiz, mas o Bun procura
+      # transitivas no node_modules do próprio pacote. Sem estes volumes o bind
+      # mount ./:/app sobrescreve com o node_modules do host (incompleto em
+      # workspaces) e o carregamento falha com ENOENT (pino-pretty, drizzle-orm…).
+      - /app/apps/backend/node_modules
+      - /app/apps/viewer/node_modules
+      - /app/packages/db/node_modules
+      - /app/packages/generated/node_modules
       # SQLite de coordenação ISOLADO do bind mount do source — volume nomeado.
       # Sem isso, escritas no DB disparariam reload do `bun --watch` (loop).
       - db-data:/app/data
