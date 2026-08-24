@@ -127,6 +127,19 @@ export interface FaturaResumo {
 	cobrancasCount: number;
 }
 
+/**
+ * Resumo de parceiro p/ listagem do painel (seletor de nova fatura) — sem o
+ * endereço completo (o detalhe carrega o resto via `buscarParceiroPorId`).
+ * Documento **limpo** (a máscara é só na serialização de UI).
+ */
+export interface ParceiroResumo {
+	id: number;
+	razaoSocial: string;
+	fantasia?: string;
+	/** CNPJ limpo. */
+	cnpj: string;
+}
+
 /** Erro de emissão registrado (`t_nfcom_erros`) — leitura p/ inspeção (SPEC-0001). */
 export interface ErroEmissao {
 	id: number;
@@ -169,6 +182,12 @@ export interface AtacadoPort {
 	 * Atacado responde 404 (nenhum registro com o filtro).
 	 */
 	listarFaturas(filtro: FiltroFaturas): Promise<FaturaResumo[]>;
+	/**
+	 * Lista resumos de parceiro (painel — seletor para nova fatura). Sem
+	 * endereço (o detalhe usa `buscarParceiroPorId`). `[]` quando o Atacado
+	 * responde 404 (nenhum registro).
+	 */
+	listarParceiros(): Promise<ParceiroResumo[]>;
 
 	// Criação da árvore (direta, com rollback manual — SPEC-0002)
 	criarFatura(input: CriarFaturaInput): Promise<{ id: number }>;

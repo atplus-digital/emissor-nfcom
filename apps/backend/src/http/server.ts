@@ -10,20 +10,23 @@
  * + /painel (auth cookie NocoBase) quando `painelCookieSecret` E `authNocoBase`
  * estão presentes (o painel é opcional — sem o secret, o app segue como antes).
  */
+
+import type { CoordDB } from "@emissor/db/client";
 import { Hono } from "hono";
+import type { DefaultsFiscais } from "#/domain/fatura/defaults-fiscais";
 import type { AtacadoPort } from "#/domain/ports/atacado.port";
 import type { QueuePort } from "#/domain/ports/queue.port";
-import type { DefaultsFiscais } from "#/domain/fatura/defaults-fiscais";
+import { apiKeyMiddleware } from "#/http/middlewares/api-key";
+import { errorHandler } from "#/http/middlewares/error-handler";
+import { criarPainelSessionMiddleware } from "#/http/middlewares/painel-session";
+import { requestLogMiddleware } from "#/http/middlewares/request-log";
 import { criarFaturasRoutes } from "#/http/routes/faturas.route";
 import { criarHealthRoute, pingSqlite } from "#/http/routes/health.route";
 import { criarPainelAuthRoutes } from "#/http/routes/painel-auth.route";
 import { criarPainelDataRoutes } from "#/http/routes/painel-data.route";
-import { criarPainelSessionMiddleware } from "#/http/middlewares/painel-session";
+import { criarPainelFilasRoutes } from "#/http/routes/painel-filas.route";
+import type { FilasSnapshot } from "#/lib/queue-inspector";
 import type { AuthNocoBaseClient } from "#/modules/atacado/translators/auth";
-import type { CoordDB } from "@emissor/db/client";
-import { apiKeyMiddleware } from "#/http/middlewares/api-key";
-import { requestLogMiddleware } from "#/http/middlewares/request-log";
-import { errorHandler } from "#/http/middlewares/error-handler";
 
 export interface AppDeps {
 	atacado: AtacadoPort;
@@ -51,6 +54,11 @@ export interface AppDeps {
 	authNocoBase?: AuthNocoBaseClient;
 	/** Id do autenticador NocoBase (env.NOCOBASE_AUTHENTICATOR) — contexto do painel. */
 	nocobaseAuthenticator?: string;
+	/**
+	 * Inspetor de filas BullMQ p/ o painel (GET /painel/api/filas). Opcional:
+	 * ausente → a rota de filas não é montada (o painel segue sem ela).
+	 */
+	inspecionarFilas?: () => Promise<FilasSnapshot>;
 }
 
 /**
@@ -80,14 +88,43 @@ export function criarApp(deps: AppDeps): Hono {
 			deps.authNocoBase,
 		);
 		const painel = new Hono();
-		painel.route("/", criarPainelAuthRoutes({ session, authClient: deps.authNocoBase }));
-		painel.route("/", criarPainelDataRoutes({ atacado: deps.atacado, session }));
+		painel.route(
+			"/",
+			criarPainelAuthRoutes({ session, authClient: deps.authNocoBase }),
+		);
+		// O painel também emite (preparar + emitir) — os deps de fila/cálculo
+		// são os mesmos das rotas de API key (já em AppDeps).
+		painel.route(
+			"/",
+			criarPainelDataRoutes({
+				atacado: deps.atacado,
+				session,
+				queue: deps.queue,
+				defaultsFiscais: deps.defaultsFiscais,
+				ieIsento: deps.ieIsento,
+			}),
+		);
+		// Fila BullMQ em tempo real (opcional — só quando o inspetor é injetado).
+		if (deps.inspecionarFilas) {
+			painel.route(
+				"/",
+				criarPainelFilasRoutes({ session, inspecionar: deps.inspecionarFilas }),
+			);
+		}
 		app.route("/painel", painel);
 	}
 
 	// Rotas protegidas por API key
 	app.use("*", apiKeyMiddleware(deps.apiKey));
-	app.route("/", criarFaturasRoutes({ atacado: deps.atacado, queue: deps.queue, defaultsFiscais: deps.defaultsFiscais, ieIsento: deps.ieIsento }));
+	app.route(
+		"/",
+		criarFaturasRoutes({
+			atacado: deps.atacado,
+			queue: deps.queue,
+			defaultsFiscais: deps.defaultsFiscais,
+			ieIsento: deps.ieIsento,
+		}),
+	);
 
 	return app;
 }

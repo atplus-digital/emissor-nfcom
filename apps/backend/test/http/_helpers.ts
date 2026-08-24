@@ -5,7 +5,7 @@
  * Os fakes são objetos simples cujos métodos o teste pode sobrescrever; quando
  * o teste quer contar chamadas, cria um wrapper que empurra p/ um array.
  */
-import type { AtacadoPort } from "#/domain/ports/atacado.port";
+import type { AtacadoPort, ParceiroResumo } from "#/domain/ports/atacado.port";
 import type { QueuePort } from "#/domain/ports/queue.port";
 import type {
 	Cliente,
@@ -37,6 +37,17 @@ export function parceiroFixture(over: Partial<Parceiro> = {}): Parceiro {
 			uf: "PR",
 		},
 		ie: "123",
+		...over,
+	};
+}
+
+/** Resumo de parceiro p/ listagem (CNPJ limpo — como o domínio entrega). */
+export function parceiroResumoFixture(over: Partial<ParceiroResumo> = {}): ParceiroResumo {
+	return {
+		id: 42,
+		razaoSocial: "Parceiro Ltda",
+		fantasia: "Parceiro",
+		cnpj: CNPJ_VALIDO,
 		...over,
 	};
 }
@@ -74,6 +85,7 @@ export function fakeAtacado(over: Partial<AtacadoPort> = {}): AtacadoPort {
 		getFaturaPorId: async () => null,
 		buscarErrosPorFatura: async () => [],
 		listarFaturas: async () => [],
+		listarParceiros: async () => [],
 		criarFatura: async () => ({ id: 101 }),
 		criarCobranca: async () => ({ id: 456 }),
 		criarNota: async () => ({ id: 7 }),

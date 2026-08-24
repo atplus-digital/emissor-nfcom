@@ -14,7 +14,6 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
-import { documentoValido } from "#/domain/fatura/validacao";
 import type { Fatura } from "#/domain/types";
 import type { AtacadoPort, ErroEmissao } from "#/domain/ports/atacado.port";
 import type { QueuePort } from "#/domain/ports/queue.port";
@@ -25,6 +24,7 @@ import {
 } from "#/http/middlewares/envelope";
 import { errorHandler } from "#/http/middlewares/error-handler";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { emitirFatura } from "./emitir.handler";
 import { executarPreparacao, type PrepararInput } from "./preparar.handler";
 
 /** Dependências injetadas (o composition root liga os reais). */
@@ -46,7 +46,11 @@ export interface FaturasRoutesDeps {
 	ieIsento?: string;
 }
 
-const prepararBodySchema = z.object({
+/**
+ * Body de `POST /faturas/preparar` (mesmo schema da rota do painel —
+ * `painel-data.route.ts` reusa este export p/ não divergir).
+ */
+export const prepararBodySchema = z.object({
 	parceiroId: z.number().int().positive(),
 	dataReferencia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dataReferencia deve ser YYYY-MM-DD"),
 	tipoFaturamento: z.enum(["parceiro", "via-parceiro", "cofaturamento", "cliente-final"]),
@@ -93,46 +97,10 @@ export function criarFaturasRoutes(deps: FaturasRoutesDeps): Hono {
 			return c.json(corpo, status as ContentfulStatusCode);
 		}
 
-		// Carrega a fatura (árvore). Não encontrada → 404.
-		const fatura = await carregarFatura(atacado, id);
-		if (!fatura) {
-			const { corpo, status } = erroResponse(TipoErro.NAO_ENCONTRADO, "Fatura não encontrada");
-			return c.json(corpo, status as ContentfulStatusCode);
-		}
-
-		// Caso 1: 409 se emitindo/emitida.
-		if (fatura.status === "emitindo" || fatura.status === "emitida") {
-			const { corpo, status } = erroResponse(TipoErro.CONFLITO, "Emissão já em curso ou concluída");
-			return c.json(corpo, status as ContentfulStatusCode);
-		}
-
-		// Caso 3: soma das cobranças == total da fatura (até 1 centavo).
-		const soma = fatura.cobrancas.reduce((acc, cb) => acc + cb.valorTotal, 0);
-		if (Math.abs(soma - fatura.valorTotal) > 1) {
-			const { corpo, status } = erroResponse(TipoErro.VALIDACAO, "Soma das cobranças diverge do total da fatura");
-			return c.json(corpo, status as ContentfulStatusCode);
-		}
-
-		// Caso 4: toda cobrança tem ≥1 nota a-emitir.
-		const semNota = fatura.cobrancas.find((cb) => !cb.notas.some((n) => n.statusInterno === "a-emitir"));
-		if (semNota) {
-			const { corpo, status } = erroResponse(TipoErro.VALIDACAO, "Toda cobrança precisa de nota a-emitir");
-			return c.json(corpo, status as ContentfulStatusCode);
-		}
-
-		// Caso 8: documentos válidos (destinatários).
-		const notas = fatura.cobrancas.flatMap((cb) => cb.notas);
-		const docInvalido = notas.find((n) => !documentoValido(n.cpfcnpj));
-		if (docInvalido) {
-			const { corpo, status } = erroResponse(TipoErro.VALIDACAO, `Documento do destinatário inválido: ${docInvalido.nome}`);
-			return c.json(corpo, status as ContentfulStatusCode);
-		}
-
-		// Enfileira (não executa síncrono — ADR-0002). C2: enfileira só o id; o
-		// worker (B1) carrega a fatura por `getFaturaPorId` — não precisa de
-		// parceiroId/dataReferencia aqui.
-		const { jobId } = await queue.enfileirarEmissaoFatura(id);
-		return c.json({ jobId, statusUrl: `/faturas/${id}/emissao` }, 202);
+		// Delega o gating + enfileiramento ao handler compartilhado (a rota do
+		// painel reusa o mesmo — sem divergência de comportamento).
+		const resultado = await emitirFatura(atacado, queue, id);
+		return c.json(resultado.corpo, resultado.status as ContentfulStatusCode);
 	});
 
 	// ============================================================

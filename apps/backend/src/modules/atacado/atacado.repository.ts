@@ -25,6 +25,7 @@ import type {
 	ErroEmissao,
 	FaturaResumo,
 	FiltroFaturas,
+	ParceiroResumo,
 	RegistrarErroInput,
 } from "#/domain/ports/atacado.port";
 import type { Cliente, Fatura, Parceiro, Plano } from "#/domain/types";
@@ -41,7 +42,7 @@ import { faturaToCreate, faturaToDomain, type FaturaExterna } from "./translator
 import { itemToCreate } from "./translators/item";
 import { notaToCreate } from "./translators/nota";
 import { parceiroToDomain, type ParceiroExterno } from "./translators/parceiro";
-import { realToCents } from "./translators/money";
+import { desmascararDoc, realToCents } from "./translators/money";
 
 const COL = {
 	faturas: "t_nfcom_faturas",
@@ -179,6 +180,25 @@ export class AtacadoRepository implements AtacadoPort {
 			// NocoBase responde 404 em `list` quando não há registro com o
 			// filtro → lista vazia (idem buscarClientesAtivosPorParceiro).
 			// Outros erros (5xx, etc.) propagam.
+			if (err instanceof AtacadoError && err.statusCode === 404) return [];
+			throw err;
+		}
+	}
+
+	async listarParceiros(): Promise<ParceiroResumo[]> {
+		try {
+			const rows = await this.client.list(COL.parceiros, {});
+			// Resumo inline (sem parceiroToDomain — a lista não precisa montar o
+			// endereço; só os campos do seletor). CNPJ limpo no domínio.
+			return (rows as ParceiroExterno[]).map((e) => ({
+				id: e.id,
+				razaoSocial: e.f_razao_social,
+				fantasia: e.f_fantasia,
+				cnpj: desmascararDoc(e.f_cnpj),
+			}));
+		} catch (err) {
+			// NocoBase responde 404 em `list` quando não há registro → lista
+			// vazia (idem listarFaturas). Outros erros (5xx, etc.) propagam.
 			if (err instanceof AtacadoError && err.statusCode === 404) return [];
 			throw err;
 		}

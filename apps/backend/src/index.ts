@@ -9,31 +9,36 @@
  *
  * Ordem: env → migrate DB → redis → repositories → queue → app → workers → listen.
  */
+
+import { getDb } from "@emissor/db/client";
 import { serve } from "bun";
 import { migrate } from "drizzle-orm/libsql/migrator";
+import type { AsaasPort } from "#/domain/ports/asaas.port";
+import type { AtacadoPort } from "#/domain/ports/atacado.port";
+import type { NfcomPort } from "#/domain/ports/nfcom.port";
+import type { QueuePort } from "#/domain/ports/queue.port";
+import type { EventoWebhook } from "#/domain/types";
 import { env } from "#/env";
-import { log, runWithLogContext } from "#/lib/logger";
-import { getDb } from "@emissor/db/client";
-import { getRedis } from "#/lib/redis";
-import { getQueue, WORKER_DEFAULTS, gracefulShutdown } from "#/lib/queues";
-import { QUEUE_NAMES, JOB_NAMES } from "#/lib/queue-names";
-import { createRateLimiter, wrapWithRateLimit } from "#/lib/rate-limit";
 import { criarApp } from "#/http/server";
-import { createAtacadoClient } from "#/modules/atacado/atacado.client";
-import { createAuthNocoBaseClient } from "#/modules/atacado/translators/auth";
-import { AtacadoRepository } from "#/modules/atacado/atacado.repository";
+import { log, runWithLogContext } from "#/lib/logger";
+import { inspecionarFilas } from "#/lib/queue-inspector";
+import { JOB_NAMES, QUEUE_NAMES } from "#/lib/queue-names";
+import { getQueue, gracefulShutdown, WORKER_DEFAULTS } from "#/lib/queues";
+import { createRateLimiter, wrapWithRateLimit } from "#/lib/rate-limit";
+import { getRedis } from "#/lib/redis";
 import { createAsaasClient } from "#/modules/asaas/asaas.client";
 import { AsaasRepository } from "#/modules/asaas/asaas.repository";
+import { createAtacadoClient } from "#/modules/atacado/atacado.client";
+import { AtacadoRepository } from "#/modules/atacado/atacado.repository";
+import { createAuthNocoBaseClient } from "#/modules/atacado/translators/auth";
 import { criarNfcomClient } from "#/modules/nfcom/nfcom.client";
 import { criarNfcomRepository } from "#/modules/nfcom/nfcom.repository";
 import { criarEmissaoWorker } from "#/workers/emissao.worker";
 import { criarOutboxWorker } from "#/workers/outbox.worker";
-import { criarWebhookWorker, enfileirarWebhook } from "#/workers/webhook.worker";
-import type { QueuePort } from "#/domain/ports/queue.port";
-import type { AtacadoPort } from "#/domain/ports/atacado.port";
-import type { AsaasPort } from "#/domain/ports/asaas.port";
-import type { NfcomPort } from "#/domain/ports/nfcom.port";
-import type { EventoWebhook } from "#/domain/types";
+import {
+	criarWebhookWorker,
+	enfileirarWebhook,
+} from "#/workers/webhook.worker";
 
 async function main() {
 	await runWithLogContext({ fila: "boot" }, async () => {
@@ -118,6 +123,8 @@ async function main() {
 			nocobaseAuthenticator: env.NOCOBASE_AUTHENTICATOR,
 			// LOG_LEVEL=debug/trace → detalhe de ERRO_INTERNO na resposta (diagnóstico).
 			logLevel: env.LOG_LEVEL,
+			// Fila BullMQ em tempo real no painel (GET /painel/api/filas).
+			inspecionarFilas,
 		});
 
 		// 6. Workers (mesmo processo, single-instance — ADR-0002).
@@ -148,7 +155,9 @@ async function main() {
 		// 8. Graceful shutdown (ADR-0002: 30s drena jobs em andamento).
 		const shutdown = async (sig: string) => {
 			log.info({ sig }, "shutdown iniciado");
-			const workers = await Promise.resolve(emissaoWorkers.workers).catch(() => []);
+			const workers = await Promise.resolve(emissaoWorkers.workers).catch(
+				() => [],
+			);
 			await gracefulShutdown([...workers, webhookWorker, outboxWorker], 30_000);
 			server.stop(true);
 			await redis.quit().catch(() => {});
@@ -164,5 +173,3 @@ main().catch((err) => {
 	log.error({ err }, "erro fatal no boot");
 	process.exit(1);
 });
-
-

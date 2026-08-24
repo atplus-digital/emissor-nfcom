@@ -259,7 +259,10 @@ export async function executarPreparacao(
 }
 
 /**
- * Serializa a fatura criada/atualizada para a resposta (domínio → JSON, IDs reais).
+ * Serializa a fatura criada/atualizada para a resposta (domínio → JSON, IDs reais,
+ * centavos inteiros + documentos limpos — a fronteira de UI do painel converte via
+ * `serializarPreparo`). A árvore sai completa (itens incluídos) para a revisão de
+ * emissão exibir o que será emitido.
  * (Espelha o serializador da rota de emissão — mantido aqui coeso ao handler.)
  */
 export function serializarFatura(fatura: Fatura, faturaId: number): unknown {
@@ -277,13 +280,37 @@ export function serializarFatura(fatura: Fatura, faturaId: number): unknown {
 			documentoDevedor: cb.documentoDevedor,
 			emailDevedor: cb.emailDevedor,
 			status: cb.status,
+			dataVencimento: cb.dataVencimento,
+			// Mesma descrição exibida no boleto (f_descricao) — derivada dos itens
+			// de todas as notas da cobrança + referência de mês (idem persistência).
+			descricao: montarDescricaoCobranca(
+				cb.notas.flatMap((n) => n.itens),
+				fatura.dataReferencia,
+			),
 			notas: cb.notas.map((n) => ({
 				id: n.id,
 				nome: n.nome,
 				cpfcnpj: n.cpfcnpj,
+				email: n.email,
+				telefone: n.telefone,
 				endereco: n.endereco,
+				total: n.total,
 				cobrancaId: cb.id,
 				status: n.statusInterno,
+				itens: n.itens.map((i) => ({
+					item: i.item,
+					codigo: i.codigo,
+					descricao: i.descricao,
+					cfop: i.cfop,
+					cclass: i.cclass,
+					quantidade: i.quantidade,
+					unitario: i.unitario,
+					total: i.total,
+					aliqIcms: i.aliqIcms,
+					bcIcms: i.bcIcms,
+					icms: i.icms,
+					incideAliquota: i.incideAliquota,
+				})),
 			})),
 		})),
 	};

@@ -61,6 +61,35 @@ describe("POST /faturas/preparar — rota fina (M7) + upsert preserva árvore (m
 		expect(body.cobrancas[0].notas[0].id).toBe(7);
 	});
 
+	test("resposta inclui detalhe da árvore (revisão de emissão): vencimento, descrição da cobrança, total/itens da nota", async () => {
+		const res = await post(appPreparar(prepararDepsValidos()), BODY);
+		expect(res.status).toBe(201);
+		const body = await res.json();
+		const cb = body.cobrancas[0];
+		expect(cb.dataVencimento).toBe("2026-09-10");
+		// Mesma descrição persistida em f_descricao (itens + referência de mês).
+		expect(cb.descricao).toBe("1x Plano 100Mbps = R$ 100,00\nAgo/2026");
+		const nota = cb.notas[0];
+		expect(nota.total).toBe(10000); // centavos (domínio)
+		expect(nota.email).toBe("fin@parceiro.com");
+		expect(nota.itens).toEqual([
+			{
+				item: undefined,
+				codigo: undefined,
+				descricao: "Plano 100Mbps",
+				cfop: "6307",
+				cclass: "0100201",
+				quantidade: 1,
+				unitario: 10000,
+				total: 10000,
+				aliqIcms: 0,
+				bcIcms: 10000,
+				icms: 0,
+				incideAliquota: false,
+			},
+		]);
+	});
+
 	test("m13: re-POST inválido (parceiro sumiu) NÃO remove a árvore antiga", async () => {
 		const removido = mock(() => Promise.resolve());
 		const atacado = fakeAtacado({

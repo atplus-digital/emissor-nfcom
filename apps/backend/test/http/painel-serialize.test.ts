@@ -8,12 +8,24 @@
 import { describe, expect, test } from "bun:test";
 import {
 	mascararDoc,
+	serializarClienteLista,
 	serializarEmissaoPainel,
 	serializarFaturaDetalhe,
 	serializarFaturaLista,
+	serializarParceiroDetalhe,
+	serializarParceiroLista,
+	serializarPreparo,
+	type PreparoCru,
 } from "#/http/routes/painel-serialize";
 import type { FaturaResumo } from "#/domain/ports/atacado.port";
-import { CPF_VALIDO, CNPJ_VALIDO, faturaAemitirFixture } from "./_helpers";
+import {
+	CPF_VALIDO,
+	CNPJ_VALIDO,
+	clienteFixture,
+	faturaAemitirFixture,
+	parceiroFixture,
+	parceiroResumoFixture,
+} from "./_helpers";
 
 const resumoFixture: FaturaResumo = {
 	id: 101,
@@ -121,5 +133,171 @@ describe("mascararDoc", () => {
 	test("documento já mascarado ou de outro tamanho → não altera", () => {
 		expect(mascararDoc("11.444.777/0001-61")).toBe("11.444.777/0001-61");
 		expect(mascararDoc("123")).toBe("123");
+	});
+});
+
+describe("serializarParceiroLista", () => {
+	test("CNPJ limpo → mascarado; fantasia ausente → undefined", () => {
+		const [item, outro] = serializarParceiroLista([
+			parceiroResumoFixture(),
+			parceiroResumoFixture({ id: 7, razaoSocial: "Outro", fantasia: undefined }),
+		]);
+		expect(item).toEqual({
+			id: 42,
+			razaoSocial: "Parceiro Ltda",
+			fantasia: "Parceiro",
+			cnpj: "11.444.777/0001-61",
+		});
+		expect(outro.fantasia).toBeUndefined();
+	});
+
+	test("lista vazia → []", () => {
+		expect(serializarParceiroLista([])).toEqual([]);
+	});
+});
+
+describe("serializarParceiroDetalhe", () => {
+	test("detalhe completo (cnpj mascarado, endereço, ie, diaVencimento)", () => {
+		const d = serializarParceiroDetalhe(parceiroFixture());
+		expect(d).toEqual({
+			id: 42,
+			razaoSocial: "Parceiro Ltda",
+			fantasia: "Parceiro",
+			cnpj: "11.444.777/0001-61",
+			emailFaturamento: "fin@parceiro.com",
+			diaVencimento: 10,
+			ie: "123",
+			endereco: {
+				logradouro: "Rua Exemplo",
+				numero: "123",
+				bairro: "Centro",
+				cep: "80000000",
+				cidade: "Curitiba",
+				uf: "PR",
+			},
+		});
+	});
+
+	test("parceiro sem IE → ie undefined", () => {
+		const d = serializarParceiroDetalhe(parceiroFixture({ ie: undefined }));
+		expect(d.ie).toBeUndefined();
+	});
+});
+
+describe("serializarClienteLista", () => {
+	test("cpfcnpj mascarado e linhas com unitário em reais (centavos/100)", () => {
+		const [item] = serializarClienteLista([
+			clienteFixture({ linhas: [{ planoId: 100, descricao: "Plano 100Mbps", unitario: 10000, quantidade: 2 }] }),
+		]);
+		expect(item.cpfcnpj).toBe("529.982.247-25");
+		expect(item.linhas).toEqual([
+			{ planoId: 100, descricao: "Plano 100Mbps", unitario: 100, quantidade: 2 },
+		]);
+		expect(item.endereco.cidade).toBe("Curitiba");
+	});
+
+	test("lista vazia → []", () => {
+		expect(serializarClienteLista([])).toEqual([]);
+	});
+});
+
+describe("serializarPreparo", () => {
+	test("centavos → reais e docs limpos → mascarados (contrato do painel)", () => {
+		const cru: PreparoCru = {
+			faturaId: 101,
+			status: "a-emitir",
+			dataReferencia: "2026-08-01",
+			dataVencimento: "2026-09-10",
+			valorTotal: 10000,
+			tipoFaturamento: "parceiro",
+			cobrancas: [
+				{
+					id: 456,
+					valorTotal: 10000,
+					nomeDevedor: "Parceiro Ltda",
+					documentoDevedor: CNPJ_VALIDO,
+					emailDevedor: "fin@parceiro.com",
+					status: "a-emitir",
+					dataVencimento: "2026-09-10",
+					descricao: "1x Plano 100Mbps = R$ 100,00\nAgo/2026",
+					notas: [
+						{
+							id: 7,
+							nome: "Parceiro Ltda",
+							cpfcnpj: CNPJ_VALIDO,
+							email: "fin@parceiro.com",
+							telefone: "41 3333-0000",
+							endereco: {
+								logradouro: "Rua Exemplo",
+								numero: "123",
+								bairro: "Centro",
+								cep: "80000000",
+								cidade: "Curitiba",
+								uf: "PR",
+							},
+							total: 10000,
+							cobrancaId: 456,
+							status: "a-emitir",
+							itens: [
+								{
+									descricao: "Plano 100Mbps",
+									cfop: "7309",
+									cclass: "1",
+									quantidade: 1,
+									unitario: 10000,
+									total: 10000,
+									aliqIcms: 0.18,
+									bcIcms: 10000,
+									icms: 1800,
+									incideAliquota: true,
+								},
+							],
+						},
+					],
+				},
+			],
+		};
+		const out = serializarPreparo(cru);
+		expect(out.faturaId).toBe(101);
+		expect(out.valorTotal).toBe(100);
+		expect(out.cobrancas).toHaveLength(1);
+		expect(out.cobrancas[0].valorTotal).toBe(100);
+		expect(out.cobrancas[0].documentoDevedor).toBe("11.444.777/0001-61");
+		expect(out.cobrancas[0].dataVencimento).toBe("2026-09-10");
+		expect(out.cobrancas[0].descricao).toBe("1x Plano 100Mbps = R$ 100,00\nAgo/2026");
+		expect(out.cobrancas[0].notas[0]).toEqual({
+			id: 7,
+			nome: "Parceiro Ltda",
+			cpfcnpj: "11.444.777/0001-61",
+			email: "fin@parceiro.com",
+			telefone: "41 3333-0000",
+			endereco: {
+				logradouro: "Rua Exemplo",
+				numero: "123",
+				bairro: "Centro",
+				cep: "80000000",
+				cidade: "Curitiba",
+				uf: "PR",
+			},
+			total: 100,
+			cobrancaId: 456,
+			status: "a-emitir",
+			itens: [
+				{
+					item: undefined,
+					codigo: undefined,
+					descricao: "Plano 100Mbps",
+					cfop: "7309",
+					cclass: "1",
+					quantidade: 1,
+					unitario: 100,
+					total: 100,
+					aliqIcms: 0.18,
+					bcIcms: 100,
+					icms: 18,
+					incideAliquota: true,
+				},
+			],
+		});
 	});
 });

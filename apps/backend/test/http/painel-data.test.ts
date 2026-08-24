@@ -20,7 +20,14 @@ import {
 	criarPainelSessionMiddleware,
 	PAINEL_COOKIE,
 } from "#/http/middlewares/painel-session";
-import { fakeAtacado, faturaAemitirFixture } from "./_helpers";
+import {
+	clienteFixture,
+	fakeAtacado,
+	fakeQueue,
+	faturaAemitirFixture,
+	parceiroFixture,
+	parceiroResumoFixture,
+} from "./_helpers";
 import type { FaturaResumo } from "#/domain/ports/atacado.port";
 
 const SECRET = "segredo-de-teste-painel-data";
@@ -46,12 +53,12 @@ const resumo: FaturaResumo = {
 	cobrancasCount: 1,
 };
 
-function appData(atacado = fakeAtacado()) {
+function appData(atacado = fakeAtacado(), queue = fakeQueue()) {
 	const session = criarPainelSessionMiddleware(SECRET, {
 		signIn: async () => ({ token: "t" }),
 		check: async () => true,
 	});
-	return criarPainelDataRoutes({ atacado, session });
+	return criarPainelDataRoutes({ atacado, session, queue });
 }
 
 describe("GET /api/faturas — autenticação", () => {
@@ -227,5 +234,276 @@ describe("GET /api/faturas/:id/emissao — estado + erros", () => {
 	test("sem auth → 401", async () => {
 		const res = await appData().request("/api/faturas/101/emissao");
 		expect(res.status).toBe(401);
+	});
+});
+
+describe("GET /api/parceiros — lista (seletor)", () => {
+	test("sem auth → 401 NAO_AUTORIZADO", async () => {
+		const res = await appData().request("/api/parceiros");
+		expect(res.status).toBe(401);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("NAO_AUTORIZADO");
+	});
+
+	test("auth → 200 lista com cnpj mascarado (fronteira de UI)", async () => {
+		const app = appData(
+			fakeAtacado({
+				listarParceiros: async () => [parceiroResumoFixture(), parceiroResumoFixture({ id: 7, razaoSocial: "Outro", fantasia: undefined })],
+			} as any),
+		);
+		const res = await app.request("/api/parceiros", { headers: AUTH });
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body).toHaveLength(2);
+		expect(body[0]).toEqual({
+			id: 42,
+			razaoSocial: "Parceiro Ltda",
+			fantasia: "Parceiro",
+			cnpj: "11.444.777/0001-61",
+		});
+		expect(body[1].fantasia).toBeUndefined();
+	});
+
+	test("lista vazia → 200 []", async () => {
+		const res = await appData().request("/api/parceiros", { headers: AUTH });
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual([]);
+	});
+});
+
+describe("GET /api/parceiros/:id — detalhe", () => {
+	test("auth → 200 detalhe (cnpj mascarado, endereço, ie, diaVencimento)", async () => {
+		const app = appData(
+			fakeAtacado({ buscarParceiroPorId: async () => parceiroFixture() } as any),
+		);
+		const res = await app.request("/api/parceiros/42", { headers: AUTH });
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body).toEqual({
+			id: 42,
+			razaoSocial: "Parceiro Ltda",
+			fantasia: "Parceiro",
+			cnpj: "11.444.777/0001-61",
+			emailFaturamento: "fin@parceiro.com",
+			diaVencimento: 10,
+			ie: "123",
+			endereco: {
+				logradouro: "Rua Exemplo",
+				numero: "123",
+				bairro: "Centro",
+				cep: "80000000",
+				cidade: "Curitiba",
+				uf: "PR",
+			},
+		});
+	});
+
+	test("parceiro null → 404 NAO_ENCONTRADO", async () => {
+		const app = appData(fakeAtacado({ buscarParceiroPorId: async () => null } as any));
+		const res = await app.request("/api/parceiros/999", { headers: AUTH });
+		expect(res.status).toBe(404);
+		const body = await res.json();
+		expect(body.erro.tipo).toBe("NAO_ENCONTRADO");
+	});
+
+	test("id inválido (abc / 0) → 422 VALIDACAO", async () => {
+		for (const id of ["abc", "0"]) {
+			const res = await appData().request(`/api/parceiros/${id}`, { headers: AUTH });
+			expect(res.status).toBe(422);
+			const body = await res.json();
+			expect(body.erro.tipo).toBe("VALIDACAO");
+		}
+	});
+
+	test("sem auth → 401", async () => {
+		const res = await appData().request("/api/parceiros/42");
+		expect(res.status).toBe(401);
+	});
+});
+
+describe("GET /api/parceiros/:id/clientes — clientes ativos", () => {
+	test("auth → 200 com cpfcnpj mascarado e linhas unitário em reais", async () => {
+		const app = appData(
+			fakeAtacado({
+				buscarClientesAtivosPorParceiro: async () => [
+					clienteFixture({ fantasia: "CF", linhas: [{ planoId: 100, descricao: "Plano 100Mbps", unitario: 10000, quantidade: 2 }] }),
+				],
+			} as any),
+		);
+		const res = await app.request("/api/parceiros/42/clientes", { headers: AUTH });
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body).toHaveLength(1);
+		expect(body[0].cpfcnpj).toBe("529.982.247-25");
+		expect(body[0].fantasia).toBe("CF");
+		expect(body[0].linhas).toEqual([
+			{ planoId: 100, descricao: "Plano 100Mbps", unitario: 100, quantidade: 2 },
+		]);
+		expect(body[0].endereco.cidade).toBe("Curitiba");
+	});
+
+	test("parceiro sem clientes ativos → 200 []", async () => {
+		const app = appData(
+			fakeAtacado({ buscarClientesAtivosPorParceiro: async () => [] } as any),
+		);
+		const res = await app.request("/api/parceiros/42/clientes", { headers: AUTH });
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual([]);
+	});
+
+	test("id inválido → 422; sem auth → 401", async () => {
+		expect((await appData().request("/api/parceiros/abc/clientes", { headers: AUTH })).status).toBe(422);
+		expect((await appData().request("/api/parceiros/42/clientes")).status).toBe(401);
+	});
+});
+
+describe("POST /api/faturas/preparar — emissão (mesmo handler da API key)", () => {
+	const body = { parceiroId: 42, dataReferencia: "2026-08-01", tipoFaturamento: "parceiro" };
+
+	test("sem auth → 401 NAO_AUTORIZADO", async () => {
+		const res = await appData().request("/api/faturas/preparar", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+		expect(res.status).toBe(401);
+		const b = await res.json();
+		expect(b.erro.tipo).toBe("NAO_AUTORIZADO");
+	});
+
+	test("body inválido → 422 VALIDACAO com flatten", async () => {
+		const res = await appData().request("/api/faturas/preparar", {
+			method: "POST",
+			headers: { "content-type": "application/json", ...AUTH },
+			body: JSON.stringify({ parceiroId: "x", dataReferencia: "01/08/2026", tipoFaturamento: "outro" }),
+		});
+		expect(res.status).toBe(422);
+		const b = await res.json();
+		expect(b.erro.tipo).toBe("VALIDACAO");
+		expect(b.erro.detalhe.fieldErrors).toBeDefined();
+	});
+
+	test("criação feliz → 201 com árvore em reais e docs mascarados", async () => {
+		// fakeAtacado padrão: parceiro (IE "123") + cliente + plano válidos;
+		// ids de criação 101/456/7.
+		const app = appData();
+		const res = await app.request("/api/faturas/preparar", {
+			method: "POST",
+			headers: { "content-type": "application/json", ...AUTH },
+			body: JSON.stringify(body),
+		});
+		expect(res.status).toBe(201);
+		const b = await res.json();
+		expect(b.faturaId).toBe(101);
+		expect(b.status).toBe("a-emitir");
+		expect(b.valorTotal).toBe(100); // 10000 centavos → 100,00
+		expect(b.cobrancas).toHaveLength(1);
+		const cb = b.cobrancas[0];
+		expect(cb.id).toBe(456);
+		expect(cb.valorTotal).toBe(100); // centavos → reais
+		expect(cb.documentoDevedor).toBe("11.444.777/0001-61"); // CNPJ mascarado
+		expect(cb.dataVencimento).toBe("2026-09-10");
+		expect(cb.descricao).toBe("1x Plano 100Mbps = R$ 100,00\nAgo/2026");
+		expect(cb.notas).toHaveLength(1);
+		expect(cb.notas[0]).toMatchObject({
+			id: 7,
+			// tipo `parceiro` → destinatário da nota é o próprio parceiro (CNPJ).
+			cpfcnpj: "11.444.777/0001-61", // CNPJ mascarado
+			total: 100, // centavos → reais
+			cobrancaId: 456,
+			status: "a-emitir",
+		});
+		// Itens com valores convertidos p/ reais (fronteira de UI, ADR-0004).
+		expect(cb.notas[0].itens).toEqual([
+			{
+				item: undefined,
+				codigo: undefined,
+				descricao: "Plano 100Mbps",
+				cfop: "6307",
+				cclass: "0100201",
+				quantidade: 1,
+				unitario: 100,
+				total: 100,
+				aliqIcms: 0,
+				bcIcms: 100,
+				icms: 0,
+				incideAliquota: false,
+			},
+		]);
+	});
+
+	test("parceiro inexistente (handler) → 422 VALIDACAO", async () => {
+		const app = appData(
+			fakeAtacado({ buscarParceiroPorId: async () => null } as any),
+		);
+		const res = await app.request("/api/faturas/preparar", {
+			method: "POST",
+			headers: { "content-type": "application/json", ...AUTH },
+			body: JSON.stringify(body),
+		});
+		expect(res.status).toBe(422);
+		const b = await res.json();
+		expect(b.erro.tipo).toBe("VALIDACAO");
+	});
+});
+
+describe("POST /api/faturas/:id/emitir — emissão (helper compartilhado)", () => {
+	test("sem auth → 401 NAO_AUTORIZADO", async () => {
+		const res = await appData().request("/api/faturas/101/emitir", { method: "POST" });
+		expect(res.status).toBe(401);
+		const b = await res.json();
+		expect(b.erro.tipo).toBe("NAO_AUTORIZADO");
+	});
+
+	test("id inválido (abc / 0) → 422 VALIDACAO", async () => {
+		for (const id of ["abc", "0"]) {
+			const res = await appData().request(`/api/faturas/${id}/emitir`, {
+				method: "POST",
+				headers: AUTH,
+			});
+			expect(res.status).toBe(422);
+			const b = await res.json();
+			expect(b.erro.tipo).toBe("VALIDACAO");
+		}
+	});
+
+	test("sucesso → 202 { jobId, statusUrl } e enfileira na QueuePort", async () => {
+		const f = faturaAemitirFixture();
+		const queue = fakeQueue();
+		const app = appData(
+			fakeAtacado({ getFaturaPorId: async () => f } as any),
+			queue,
+		);
+		const res = await app.request("/api/faturas/101/emitir", {
+			method: "POST",
+			headers: AUTH,
+		});
+		expect(res.status).toBe(202);
+		expect(await res.json()).toEqual({ jobId: "job-1", statusUrl: "/faturas/101/emissao" });
+		expect(queue.calls).toEqual([{ faturaId: 101 }]);
+	});
+
+	test("fatura inexistente → 404 NAO_ENCONTRADO", async () => {
+		const app = appData(fakeAtacado({ getFaturaPorId: async () => null } as any));
+		const res = await app.request("/api/faturas/999/emitir", {
+			method: "POST",
+			headers: AUTH,
+		});
+		expect(res.status).toBe(404);
+		const b = await res.json();
+		expect(b.erro.tipo).toBe("NAO_ENCONTRADO");
+	});
+
+	test("fatura emitindo → 409 CONFLITO", async () => {
+		const app = appData(
+			fakeAtacado({ getFaturaPorId: async () => faturaAemitirFixture({ status: "emitindo" }) } as any),
+		);
+		const res = await app.request("/api/faturas/101/emitir", {
+			method: "POST",
+			headers: AUTH,
+		});
+		expect(res.status).toBe(409);
+		const b = await res.json();
+		expect(b.erro.tipo).toBe("CONFLITO");
 	});
 });

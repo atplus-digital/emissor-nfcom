@@ -96,11 +96,15 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
       "documentoDevedor": "12345678000199",
       "emailDevedor": "fin@parceiro.com",
       "status": "a-emitir",
+      "dataVencimento": "2026-09-10",
+      "descricao": "1x Internet 100Mbps = R$ 99,90\nAgo/2026",
       "notas": [
         {
           "id": 7,
           "nome": "Cliente Final",
           "cpfcnpj": "11122233344",
+          "email": "cliente@final.com",
+          "telefone": "41 99999-0000",
           "endereco": {
             "logradouro": "Rua Exemplo",
             "numero": "123",
@@ -109,8 +113,24 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
             "cidade": "Curitiba",
             "uf": "PR"
           },
+          "total": 123456,
           "cobrancaId": 456,
-          "status": "a-emitir"
+          "status": "a-emitir",
+          "itens": [
+            {
+              "codigo": "001",
+              "descricao": "Internet 100Mbps",
+              "cfop": "6307",
+              "cclass": "0100201",
+              "quantidade": 1,
+              "unitario": 123456,
+              "total": 123456,
+              "aliqIcms": 0.18,
+              "bcIcms": 123456,
+              "icms": 22222,
+              "incideAliquota": true
+            }
+          ]
         }
       ]
     }
@@ -118,9 +138,17 @@ faturamento); a SPEC-0001 cobre o **como** emitir de forma confiável.
 }
 ```
 
-- `valorTotal` e `valorTotal` das cobranças são **centavos inteiros** (`number`,
-  ADR-0004). A fronteira do módulo Atacado converte o número em unidade real do CRM
-  (`123.45`, conforme tipos gerados) ↔ centavos, com arredondamento determinístico.
+- `valorTotal` (fatura, cobranças, notas) e os valores dos itens (`unitario`, `total`,
+  `bcIcms`, `icms`) são **centavos inteiros** (`number`, ADR-0004). A fronteira do
+  módulo Atacado converte o número em unidade real do CRM (`123.45`, conforme tipos
+  gerados) ↔ centavos, com arredondamento determinístico. `aliqIcms` é fração `0..1`.
+- A resposta retorna a **árvore completa** (cobranças → notas → itens) para o operador
+  revisar o que será emitido: `descricao` da cobrança (o texto exibido no boleto,
+  `f_descricao`, derivado dos itens + referência de mês — idêntico ao persistido),
+  `dataVencimento` da cobrança, e `email`/`telefone`/`total`/`itens` de cada nota.
+  A rota do painel (`/api/faturas/preparar`) aplica a mesma árvore na fronteira de UI
+  (centavos → reais + documentos mascarados); este contrato (API key) permanece em
+  formato de domínio (centavos + documentos limpos).
 - `tipoFaturamento` ∈ {`parceiro`, `via-parceiro`, `cofaturamento`, `cliente-final`}.
 - `dataReferencia` aceita qualquer dia do mês e é **normalizada para o 1º dia** na chave
   natural e na resposta; `dataVencimento` = dia de vencimento do parceiro (default 10)
