@@ -141,6 +141,20 @@
     "implemented-by": []
   },
   {
+    "id": "ADR-0012",
+    "path": "docs/adr/0012-configs-fiscais-em-banco-de-coordenacao.md",
+    "layer": "adr",
+    "title": "Configs fiscais (cClass/CFOP/ICMS) em banco de coordenação + natureza por cliente",
+    "status": "accepted",
+    "builds-on": [
+      "ADR-0003",
+      "ADR-0004",
+      "ADR-0009"
+    ],
+    "superseded-by": null,
+    "implemented-by": []
+  },
+  {
     "id": "SPEC-0001",
     "path": "docs/specs/0001-fluxo-de-emissao-de-fatura.md",
     "layer": "specs",
