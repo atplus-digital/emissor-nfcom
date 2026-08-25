@@ -9,6 +9,12 @@ jobs:
   test:
     name: Test + coverage gate
     runs-on: ubuntu-latest
+    # Os testes unitários do gerador NocoBase importam o schema de ambiente,
+    # mas não se conectam ao CRM. Valores sintéticos mantêm a validação do
+    # módulo satisfeita sem expor nem depender de credenciais no CI.
+    env:
+      NOCOBASE_API_URL: http://localhost:13000
+      NOCOBASE_API_KEY: ci-test-token
     services:
       # O gate de cobertura (bunfig.toml coverageThreshold) exige o teste de
       # integração do Flow (Redis real) — sem ele, o wiring dos workers fica

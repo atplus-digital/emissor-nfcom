@@ -1,5 +1,10 @@
 /** Unit do worker de emissão: wrapper ALS, consolidação, correções B1 (C2/C3/M1/M2/M3). */
 import { describe, expect, mock, test } from "bun:test";
+import { WaitingChildrenError } from "bullmq";
+import type { ResultadoCobranca } from "#/domain/emissao/consolidacao";
+import type { AtacadoPort } from "#/domain/ports/atacado.port";
+import type { NfcomPort } from "#/domain/ports/nfcom.port";
+import type { QueuePort } from "#/domain/ports/queue.port";
 import {
 	consolidar,
 	consolidarCobranca,
@@ -7,19 +12,15 @@ import {
 	consolidarFaturaOuCobranca,
 	consolidarFaturaPorEstado,
 	decidirPassadaEmissao,
+	ErroFatal,
+	ErroRetryable,
 	handleEmitCobranca,
 	handleEmitFatura,
 	handleEmitNfcom,
-	ErroRetryable,
 	numeroDaChave,
 	processarJobEmissao,
 	type WorkerCtx,
 } from "#/workers/emissao.worker";
-import type { ResultadoCobranca } from "#/domain/emissao/consolidacao";
-import type { AtacadoPort } from "#/domain/ports/atacado.port";
-import type { NfcomPort } from "#/domain/ports/nfcom.port";
-import type { QueuePort } from "#/domain/ports/queue.port";
-import { WaitingChildrenError } from "bullmq";
 import { mkDb } from "../helpers/db";
 
 describe("emissao.worker — consolidação (callback do parent)", () => {
@@ -63,6 +64,14 @@ describe("emissao.worker — handlers exportados (contrato)", () => {
 		expect(typeof w.handleEmitNfcom).toBe("function");
 		expect(typeof w.criarEmissaoWorker).toBe("function");
 	});
+
+	test("ErroFatal preserva a causa para falhas que não devem sofrer retry", () => {
+		const causa = new Error("nota rejeitada");
+		const erro = new ErroFatal("falha fatal", causa);
+
+		expect(erro.message).toBe("falha fatal");
+		expect(erro.causa).toBe(causa);
+	});
 });
 
 // ============================================================
@@ -84,17 +93,41 @@ function faturaFixture(extra: { id: number; cobrancas: any[] }) {
 describe("C2 — carregar fatura por id no default", () => {
 	test("default usa getFaturaPorId (não buscarFaturaPorChave)", async () => {
 		const db = await mkDb();
-		const fatura = faturaFixture({ id: 900, cobrancas: [
-			{ id: 901, faturaId: 900, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10", notas: [] },
-		] });
+		const fatura = faturaFixture({
+			id: 900,
+			cobrancas: [
+				{
+					id: 901,
+					faturaId: 900,
+					valorTotal: 10000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "a-emitir" as const,
+					dataVencimento: "2026-09-10",
+					notas: [],
+				},
+			],
+		});
 		const getFaturaPorId = mock(() => Promise.resolve(fatura));
 		const buscarFaturaPorChave = mock(() => Promise.resolve(null));
-		const atacado = { getFaturaPorId, buscarFaturaPorChave } as unknown as AtacadoPort;
+		const atacado = {
+			getFaturaPorId,
+			buscarFaturaPorChave,
+		} as unknown as AtacadoPort;
 		const enqueued: string[] = [];
 		// job SEM parceiroId/dataReferencia (só faturaId) → o default deve usar getFaturaPorId
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 900 }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado, asaas: {} as any, nfcom: {} as any, enqueueFilho: async (n) => { enqueued.push(n); } },
+			{
+				db,
+				atacado,
+				asaas: {} as any,
+				nfcom: {} as any,
+				enqueueFilho: async (n) => {
+					enqueued.push(n);
+				},
+			},
 		);
 		expect(getFaturaPorId).toHaveBeenCalledWith(900);
 		expect(buscarFaturaPorChave).not.toHaveBeenCalled();
@@ -110,8 +143,12 @@ describe("C2 — carregar fatura por id no default", () => {
 function fakeQueue(): { queue: QueuePort; eventos: any[] } {
 	const eventos: any[] = [];
 	const queue = {
-		async enfileirarWebhook(e: any) { eventos.push(e); },
-		async enfileirarEmissaoFatura() { return { jobId: "" }; },
+		async enfileirarWebhook(e: any) {
+			eventos.push(e);
+		},
+		async enfileirarEmissaoFatura() {
+			return { jobId: "" };
+		},
 	} as unknown as QueuePort;
 	return { queue, eventos };
 }
@@ -119,13 +156,35 @@ function fakeQueue(): { queue: QueuePort; eventos: any[] } {
 describe("C3 — webhook disparado", () => {
 	test("handleEmitFatura enfileira webhook fatura.status=emitindo", async () => {
 		const db = await mkDb();
-		const fatura = faturaFixture({ id: 910, cobrancas: [
-			{ id: 911, faturaId: 910, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10", notas: [] },
-		] });
+		const fatura = faturaFixture({
+			id: 910,
+			cobrancas: [
+				{
+					id: 911,
+					faturaId: 910,
+					valorTotal: 10000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "a-emitir" as const,
+					dataVencimento: "2026-09-10",
+					notas: [],
+				},
+			],
+		});
 		const { queue, eventos } = fakeQueue();
 		await handleEmitFatura(
 			{ data: { faturaId: 910 }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any, queue, enqueueFilho: async () => {} },
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(fatura)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+				queue,
+				enqueueFilho: async () => {},
+			},
 		);
 		expect(eventos.length).toBe(1);
 		expect(eventos[0].tipo).toBe("fatura.status");
@@ -137,12 +196,33 @@ describe("C3 — webhook disparado", () => {
 
 	test("sem queue (deps.queue ausente) → não lança (no-op)", async () => {
 		const db = await mkDb();
-		const fatura = faturaFixture({ id: 920, cobrancas: [
-			{ id: 921, faturaId: 920, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10", notas: [] },
-		] });
+		const fatura = faturaFixture({
+			id: 920,
+			cobrancas: [
+				{
+					id: 921,
+					faturaId: 920,
+					valorTotal: 10000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "a-emitir" as const,
+					dataVencimento: "2026-09-10",
+					notas: [],
+				},
+			],
+		});
 		await handleEmitFatura(
 			{ data: { faturaId: 920 }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any, enqueueFilho: async () => {} },
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(fatura)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+				enqueueFilho: async () => {},
+			},
 		);
 		// sem erro — o webhook é opcional (caso 14)
 		expect(true).toBe(true);
@@ -152,11 +232,45 @@ describe("C3 — webhook disparado", () => {
 		const db = await mkDb();
 		const { queue, eventos } = fakeQueue();
 		const nfcom = {
-			emitirNFCom: mock(() => Promise.resolve({ situacao: "autorizada", numero: 1, serie: 1, chave: "x", protocolo: "p" })),
+			emitirNFCom: mock(() =>
+				Promise.resolve({
+					situacao: "autorizada",
+					numero: 1,
+					serie: 1,
+					chave: "x",
+					protocolo: "p",
+				}),
+			),
 		} as unknown as NfcomPort;
 		const res = await handleEmitNfcom(
-			{ data: { notaId: 700, cobrancaId: 701, faturaId: 702, destinatario: { nome: "n", cpfcnpj: "1", uf: "PR", cidade: "C", logradouro: "R", numero: "1", bairro: "B", cep: "8" }, itens: [], total: 100 } as any, attemptsMade: 0, opts: {} } as any,
-			{ db, nfcom, atacado: {} as unknown as AtacadoPort, asaas: {} as any, queue },
+			{
+				data: {
+					notaId: 700,
+					cobrancaId: 701,
+					faturaId: 702,
+					destinatario: {
+						nome: "n",
+						cpfcnpj: "1",
+						uf: "PR",
+						cidade: "C",
+						logradouro: "R",
+						numero: "1",
+						bairro: "B",
+						cep: "8",
+					},
+					itens: [],
+					total: 100,
+				} as any,
+				attemptsMade: 0,
+				opts: {},
+			} as any,
+			{
+				db,
+				nfcom,
+				atacado: {} as unknown as AtacadoPort,
+				asaas: {} as any,
+				queue,
+			},
 		);
 		expect(res.notaOk).toBe(true);
 		expect(eventos.length).toBe(1);
@@ -177,17 +291,25 @@ describe("M1 — consolidação por grandchildren", () => {
 		// children values: duas cobranças, cada uma com notasOk REAIS.
 		const children: Record<string, any> = {
 			"1": { boletoOk: true, notasOk: [true, true] }, // 2 notas ok
-			"2": { boletoOk: true, notasOk: [false] },      // 1 nota falhou → cobrança 2 não ok
+			"2": { boletoOk: true, notasOk: [false] }, // 1 nota falhou → cobrança 2 não ok
 		};
 		const res = await consolidarFaturaOuCobranca(
 			{ data: { faturaId: 800 } } as any,
 			children,
-			{ db, atacado: {} as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any, queue },
+			{
+				db,
+				atacado: {} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+				queue,
+			},
 		);
 		// cobrança 1 totalmente ok, cobrança 2 não → parcial
 		expect(res.status).toBe("parcial");
 		// webhook de status final também disparado
-		const faturaStatus = eventos.find((e) => e.tipo === "fatura.status" && e.estado === "parcial");
+		const faturaStatus = eventos.find(
+			(e) => e.tipo === "fatura.status" && e.estado === "parcial",
+		);
 		expect(faturaStatus).toBeTruthy();
 		// lease liberado
 		const { hasLease } = await import("@emissor/db/lease");
@@ -203,7 +325,12 @@ describe("M1 — consolidação por grandchildren", () => {
 		const res = await consolidarFaturaOuCobranca(
 			{ data: { faturaId: 801 } } as any,
 			children,
-			{ db, atacado: {} as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any },
+			{
+				db,
+				atacado: {} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+			},
 		);
 		expect(res.status).toBe("erro");
 	});
@@ -221,13 +348,19 @@ describe("M1 — consolidarCobranca (2ª passada do emit-cobranca)", () => {
 			"2": { notaOk: false },
 		};
 		const res = await consolidarCobranca(job, childrenValues, { db } as any);
-		expect(res).toEqual({ boletoOk: true, notasOk: [true, false], erro: undefined });
+		expect(res).toEqual({
+			boletoOk: true,
+			notasOk: [true, false],
+			erro: undefined,
+		});
 	});
 
 	test("boleto sem key (não emitido) → boletoOk false + erro", async () => {
 		const db = await mkDb();
 		const job = { data: { cobrancaId: 962 } } as any;
-		const res = await consolidarCobranca(job, { "1": { notaOk: true } }, { db } as any);
+		const res = await consolidarCobranca(job, { "1": { notaOk: true } }, {
+			db,
+		} as any);
 		expect(res.boletoOk).toBe(false);
 		expect(res.notasOk).toEqual([true]);
 		expect(res.erro).toBe("boleto não emitido");
@@ -237,33 +370,85 @@ describe("M1 — consolidarCobranca (2ª passada do emit-cobranca)", () => {
 describe("C2 — toResumoNota: fan-out leva o resumo completo da nota", () => {
 	test("nota a-emitir → resumo com campos fiscais + itens; nota emitida é filtrada", async () => {
 		const db = await mkDb();
-		const endereco = { logradouro: "R", numero: "7", bairro: "B", cep: "80", cidade: "C", uf: "PR" };
-		const fatura = faturaFixture({ id: 970, cobrancas: [
-			{
-				id: 971, faturaId: 970, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1",
-				emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10",
-				notas: [
-					{
-						id: 972, cobrancaId: 971, nome: "João", cpfcnpj: "52998224725", email: "j@x.com",
-						rgie: "12345", telefone: "41999990000", endereco, uf: "PR", cidade: "C",
-						statusInterno: "a-emitir" as const, total: 6000,
-						itens: [{ descricao: "Plano", cfop: "6102", cclass: "0000", quantidade: 1, unitario: 6000, total: 6000, aliqIcms: 0, bcIcms: 0, icms: 0, incideAliquota: false }],
-					},
-					{
-						id: 973, cobrancaId: 971, nome: "Maria", cpfcnpj: "111", email: "m@x.com",
-						endereco, uf: "PR", cidade: "C", statusInterno: "emitida" as const, total: 4000, itens: [],
-					},
-				],
-			},
-		] });
+		const endereco = {
+			logradouro: "R",
+			numero: "7",
+			bairro: "B",
+			cep: "80",
+			cidade: "C",
+			uf: "PR",
+		};
+		const fatura = faturaFixture({
+			id: 970,
+			cobrancas: [
+				{
+					id: 971,
+					faturaId: 970,
+					valorTotal: 10000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "a-emitir" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 972,
+							cobrancaId: 971,
+							nome: "João",
+							cpfcnpj: "52998224725",
+							email: "j@x.com",
+							rgie: "12345",
+							telefone: "41999990000",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "a-emitir" as const,
+							total: 6000,
+							itens: [
+								{
+									descricao: "Plano",
+									cfop: "6102",
+									cclass: "0000",
+									quantidade: 1,
+									unitario: 6000,
+									total: 6000,
+									aliqIcms: 0,
+									bcIcms: 0,
+									icms: 0,
+									incideAliquota: false,
+								},
+							],
+						},
+						{
+							id: 973,
+							cobrancaId: 971,
+							nome: "Maria",
+							cpfcnpj: "111",
+							email: "m@x.com",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "emitida" as const,
+							total: 4000,
+							itens: [],
+						},
+					],
+				},
+			],
+		});
 		const enqueuedData: Array<[string, unknown]> = [];
 		await handleEmitFatura(
 			{ data: { faturaId: 970 }, attemptsMade: 0, opts: {} } as any,
 			{
 				db,
-				atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort,
-				asaas: {} as any, nfcom: {} as any,
-				enqueueFilho: async (n: string, data: unknown) => { enqueuedData.push([n, data]); },
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(fatura)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+				enqueueFilho: async (n: string, data: unknown) => {
+					enqueuedData.push([n, data]);
+				},
 			},
 		);
 		// o child é emit-cobranca; o resumo das notas a-emitir vai no
@@ -305,18 +490,58 @@ describe("M2 — processando exausto → nota erro", () => {
 		await resolveKey(db, "nfcom:710:emitir", "processando");
 		// última tentativa (attemptsMade 4, attempts 5)
 		const res = await handleEmitNfcom(
-			{ data: { notaId: 710, cobrancaId: 701, faturaId: 702, destinatario: { nome: "n", cpfcnpj: "1", uf: "PR", cidade: "C", logradouro: "R", numero: "1", bairro: "B", cep: "8" }, itens: [], total: 100 } as any, attemptsMade: 4, opts: { attempts: 5 } } as any,
-			{ db, nfcom, atacado: {} as unknown as AtacadoPort, asaas: {} as any, queue },
+			{
+				data: {
+					notaId: 710,
+					cobrancaId: 701,
+					faturaId: 702,
+					destinatario: {
+						nome: "n",
+						cpfcnpj: "1",
+						uf: "PR",
+						cidade: "C",
+						logradouro: "R",
+						numero: "1",
+						bairro: "B",
+						cep: "8",
+					},
+					itens: [],
+					total: 100,
+				} as any,
+				attemptsMade: 4,
+				opts: { attempts: 5 },
+			} as any,
+			{
+				db,
+				nfcom,
+				atacado: {} as unknown as AtacadoPort,
+				asaas: {} as any,
+				queue,
+			},
 		);
 		expect(res.notaOk).toBe(false);
 		expect(res.statusInterno).toBe("erro");
 		// outbox: nota erro + registrarErro
 		const { drainOutbox } = await import("@emissor/db/outbox");
 		const msgs = await drainOutbox(db, 20);
-		expect(msgs.some((m) => (m.payload as any).op === "atualizarStatusNota" && (m.payload as any).statusInterno === "erro")).toBe(true);
-		expect(msgs.some((m) => (m.payload as any).op === "registrarErro" && (m.payload as any).notaId === 710)).toBe(true);
+		expect(
+			msgs.some(
+				(m) =>
+					(m.payload as any).op === "atualizarStatusNota" &&
+					(m.payload as any).statusInterno === "erro",
+			),
+		).toBe(true);
+		expect(
+			msgs.some(
+				(m) =>
+					(m.payload as any).op === "registrarErro" &&
+					(m.payload as any).notaId === 710,
+			),
+		).toBe(true);
 		// webhook nfcom.situacao=erro
-		expect(eventos.some((e) => e.tipo === "nfcom.situacao" && e.estado === "erro")).toBe(true);
+		expect(
+			eventos.some((e) => e.tipo === "nfcom.situacao" && e.estado === "erro"),
+		).toBe(true);
 	});
 
 	test("não-última tentativa com processando → ErroRetryable (não marca erro)", async () => {
@@ -328,7 +553,27 @@ describe("M2 — processando exausto → nota erro", () => {
 		let threw = false;
 		try {
 			await handleEmitNfcom(
-				{ data: { notaId: 711, cobrancaId: 701, faturaId: 702, destinatario: { nome: "n", cpfcnpj: "1", uf: "PR", cidade: "C", logradouro: "R", numero: "1", bairro: "B", cep: "8" }, itens: [], total: 100 } as any, attemptsMade: 0, opts: { attempts: 5 } } as any,
+				{
+					data: {
+						notaId: 711,
+						cobrancaId: 701,
+						faturaId: 702,
+						destinatario: {
+							nome: "n",
+							cpfcnpj: "1",
+							uf: "PR",
+							cidade: "C",
+							logradouro: "R",
+							numero: "1",
+							bairro: "B",
+							cep: "8",
+						},
+						itens: [],
+						total: 100,
+					} as any,
+					attemptsMade: 0,
+					opts: { attempts: 5 },
+				} as any,
 				{ db, nfcom, atacado: {} as unknown as AtacadoPort, asaas: {} as any },
 			);
 		} catch (e) {
@@ -346,15 +591,57 @@ describe("M3 — 0 cobranças a-emitir → releaseLease + consolida pelo estado 
 	test("todas cobranças já emitidas → consolida emitida e libera lease", async () => {
 		const db = await mkDb();
 		const { queue, eventos } = fakeQueue();
-		const fatura = faturaFixture({ id: 950, cobrancas: [
-			{ id: 951, faturaId: 950, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "emitida" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 952, cobrancaId: 951, nome: "n", cpfcnpj: "1", endereco: { logradouro: "R", numero: "1", bairro: "B", cep: "8", cidade: "C", uf: "PR" }, uf: "PR", cidade: "C", statusInterno: "emitida" as const, total: 10000, itens: [] },
-			] },
-		] });
+		const fatura = faturaFixture({
+			id: 950,
+			cobrancas: [
+				{
+					id: 951,
+					faturaId: 950,
+					valorTotal: 10000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "emitida" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 952,
+							cobrancaId: 951,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco: {
+								logradouro: "R",
+								numero: "1",
+								bairro: "B",
+								cep: "8",
+								cidade: "C",
+								uf: "PR",
+							},
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "emitida" as const,
+							total: 10000,
+							itens: [],
+						},
+					],
+				},
+			],
+		});
 		const enqueued: string[] = [];
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 950 }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any, queue, enqueueFilho: async (n) => { enqueued.push(n); } },
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(fatura)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+				queue,
+				enqueueFilho: async (n) => {
+					enqueued.push(n);
+				},
+			},
 		);
 		expect(res.enfileiradas).toBe(0);
 		expect(enqueued.length).toBe(0);
@@ -364,9 +651,17 @@ describe("M3 — 0 cobranças a-emitir → releaseLease + consolida pelo estado 
 		// outbox: emitida
 		const { drainOutbox } = await import("@emissor/db/outbox");
 		const msgs = await drainOutbox(db, 20);
-		expect(msgs.some((m) => (m.payload as any).op === "atualizarStatusFatura" && (m.payload as any).status === "emitida")).toBe(true);
+		expect(
+			msgs.some(
+				(m) =>
+					(m.payload as any).op === "atualizarStatusFatura" &&
+					(m.payload as any).status === "emitida",
+			),
+		).toBe(true);
 		// webhook emitida
-		expect(eventos.some((e) => e.tipo === "fatura.status" && e.estado === "emitida")).toBe(true);
+		expect(
+			eventos.some((e) => e.tipo === "fatura.status" && e.estado === "emitida"),
+		).toBe(true);
 	});
 });
 
@@ -378,47 +673,153 @@ describe("A3 — M3 consolida pelo estado real (não hardcode emitida)", () => {
 	test("1 cobrança emitida + 1 em erro → fatura parcial (não emitida)", async () => {
 		const db = await mkDb();
 		const { queue, eventos } = fakeQueue();
-		const endereco = { logradouro: "R", numero: "1", bairro: "B", cep: "8", cidade: "C", uf: "PR" };
+		const endereco = {
+			logradouro: "R",
+			numero: "1",
+			bairro: "B",
+			cep: "8",
+			cidade: "C",
+			uf: "PR",
+		};
 		const nota = (id: number, st: "emitida" | "erro") => ({
-			id, cobrancaId: 960, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C",
-			statusInterno: st, total: 5000, itens: [],
+			id,
+			cobrancaId: 960,
+			nome: "n",
+			cpfcnpj: "1",
+			endereco,
+			uf: "PR",
+			cidade: "C",
+			statusInterno: st,
+			total: 5000,
+			itens: [],
 		});
-		const fatura = faturaFixture({ id: 960, cobrancas: [
-			{ id: 961, faturaId: 960, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "emitida" as const, dataVencimento: "2026-09-10", notas: [nota(962, "emitida")] },
-			{ id: 963, faturaId: 960, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "erro" as const, dataVencimento: "2026-09-10", notas: [nota(964, "erro")] },
-		] });
+		const fatura = faturaFixture({
+			id: 960,
+			cobrancas: [
+				{
+					id: 961,
+					faturaId: 960,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "emitida" as const,
+					dataVencimento: "2026-09-10",
+					notas: [nota(962, "emitida")],
+				},
+				{
+					id: 963,
+					faturaId: 960,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "erro" as const,
+					dataVencimento: "2026-09-10",
+					notas: [nota(964, "erro")],
+				},
+			],
+		});
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 960 }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any, queue, enqueueFilho: async () => {} },
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(fatura)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+				queue,
+				enqueueFilho: async () => {},
+			},
 		);
 		expect(res.enfileiradas).toBe(0);
 		// outbox: status final parcial (com A3; antes daria emitida hardcoded)
 		const { drainOutbox } = await import("@emissor/db/outbox");
 		const msgs = await drainOutbox(db, 20);
-		expect(msgs.some((m) => (m.payload as any).op === "atualizarStatusFatura" && (m.payload as any).status === "parcial")).toBe(true);
-		expect(msgs.some((m) => (m.payload as any).op === "atualizarStatusFatura" && (m.payload as any).status === "emitida")).toBe(false);
+		expect(
+			msgs.some(
+				(m) =>
+					(m.payload as any).op === "atualizarStatusFatura" &&
+					(m.payload as any).status === "parcial",
+			),
+		).toBe(true);
+		expect(
+			msgs.some(
+				(m) =>
+					(m.payload as any).op === "atualizarStatusFatura" &&
+					(m.payload as any).status === "emitida",
+			),
+		).toBe(false);
 		// webhook parcial + lease liberado (sem 2ª passada p/ fazê-lo)
-		expect(eventos.some((e) => e.tipo === "fatura.status" && e.estado === "parcial")).toBe(true);
+		expect(
+			eventos.some((e) => e.tipo === "fatura.status" && e.estado === "parcial"),
+		).toBe(true);
 		const { hasLease } = await import("@emissor/db/lease");
 		expect(await hasLease(db, 960)).toBe(false);
 	});
 
 	test("tudo em erro → fatura erro", async () => {
 		const db = await mkDb();
-		const endereco = { logradouro: "R", numero: "1", bairro: "B", cep: "8", cidade: "C", uf: "PR" };
-		const fatura = faturaFixture({ id: 965, cobrancas: [
-			{ id: 966, faturaId: 965, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "erro" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 967, cobrancaId: 966, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "erro" as const, total: 5000, itens: [] },
-			] },
-		] });
+		const endereco = {
+			logradouro: "R",
+			numero: "1",
+			bairro: "B",
+			cep: "8",
+			cidade: "C",
+			uf: "PR",
+		};
+		const fatura = faturaFixture({
+			id: 965,
+			cobrancas: [
+				{
+					id: 966,
+					faturaId: 965,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "erro" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 967,
+							cobrancaId: 966,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "erro" as const,
+							total: 5000,
+							itens: [],
+						},
+					],
+				},
+			],
+		});
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 965 }, attemptsMade: 0, opts: {} } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any, enqueueFilho: async () => {} },
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(fatura)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+				enqueueFilho: async () => {},
+			},
 		);
 		expect(res.enfileiradas).toBe(0);
 		const { drainOutbox } = await import("@emissor/db/outbox");
 		const msgs = await drainOutbox(db, 20);
-		expect(msgs.some((m) => (m.payload as any).op === "atualizarStatusFatura" && (m.payload as any).status === "erro")).toBe(true);
+		expect(
+			msgs.some(
+				(m) =>
+					(m.payload as any).op === "atualizarStatusFatura" &&
+					(m.payload as any).status === "erro",
+			),
+		).toBe(true);
 	});
 });
 
@@ -433,31 +834,55 @@ describe("A1 — decidirPassadaEmissao (4 células p/ emit-fatura e emit-cobranc
 	for (const rotulo of ["emit-fatura", "emit-cobranca"]) {
 		test(`${rotulo}: sem children registrados → primeira (fan-out)`, async () => {
 			// stub SEM getDependencies (job novo: BullMQ ainda não registrou children)
-			expect(await decidirPassadaEmissao({ data: {}, attemptsMade: 0, opts: {} } as any, undefined)).toBe("primeira");
+			expect(
+				await decidirPassadaEmissao(
+					{ data: {}, attemptsMade: 0, opts: {} } as any,
+					undefined,
+				),
+			).toBe("primeira");
 			// e com getDependencies de um job que ainda não tem dependências
 			const job = {
-				data: {}, attemptsMade: 0, opts: {},
-				getDependencies: async () => ({ processed: {}, unprocessed: [], failed: [] }),
+				data: {},
+				attemptsMade: 0,
+				opts: {},
+				getDependencies: async () => ({
+					processed: {},
+					unprocessed: [],
+					failed: [],
+				}),
 			} as any;
 			expect(await decidirPassadaEmissao(job, undefined)).toBe("primeira");
 		});
 
 		test(`${rotulo}: children + values visíveis → segunda (consolida)`, async () => {
 			const job = {
-				data: {}, attemptsMade: 1, opts: {},
+				data: {},
+				attemptsMade: 1,
+				opts: {},
 				getDependencies: async () => ({
-					processed: { "q:emit-cobranca:1": { boletoOk: true, notasOk: [true] } },
-					unprocessed: [], failed: [],
+					processed: {
+						"q:emit-cobranca:1": { boletoOk: true, notasOk: [true] },
+					},
+					unprocessed: [],
+					failed: [],
 				}),
 			} as any;
-			expect(await decidirPassadaEmissao(job, { "q:emit-cobranca:1": { boletoOk: true, notasOk: [true] } })).toBe("segunda");
+			expect(
+				await decidirPassadaEmissao(job, {
+					"q:emit-cobranca:1": { boletoOk: true, notasOk: [true] },
+				}),
+			).toBe("segunda");
 		});
 
 		test(`${rotulo}: children + values ausentes + child ativo → aguardar (retry)`, async () => {
 			const job = {
-				data: {}, attemptsMade: 1, opts: {},
+				data: {},
+				attemptsMade: 1,
+				opts: {},
 				getDependencies: async () => ({
-					processed: {}, unprocessed: ["q:emit-cobranca:1"], failed: [],
+					processed: {},
+					unprocessed: ["q:emit-cobranca:1"],
+					failed: [],
 				}),
 			} as any;
 			// "aguardar" → o dispatch estaciona (WaitingChildrenError) em vez de retornar
@@ -466,9 +891,13 @@ describe("A1 — decidirPassadaEmissao (4 células p/ emit-fatura e emit-cobranc
 
 		test(`${rotulo}: children + values ausentes + todos failed → exaustas (estado real)`, async () => {
 			const job = {
-				data: {}, attemptsMade: 1, opts: {},
+				data: {},
+				attemptsMade: 1,
+				opts: {},
 				getDependencies: async () => ({
-					processed: {}, unprocessed: [], failed: ["q:emit-cobranca:1", "q:emit-cobranca:2"],
+					processed: {},
+					unprocessed: [],
+					failed: ["q:emit-cobranca:1", "q:emit-cobranca:2"],
 				}),
 			} as any;
 			expect(await decidirPassadaEmissao(job, undefined)).toBe("exaustas");
@@ -488,21 +917,53 @@ describe("A1 — dispatch processarJobEmissao (4 células reais, sem Redis)", ()
 		jobId: "job-1",
 		job: job as WorkerCtx["job"],
 		getChildrenValues,
-		enqueueFilho: async (name) => { enfileiradas.nomes.push(name); },
+		enqueueFilho: async (name) => {
+			enfileiradas.nomes.push(name);
+		},
 		token: "tok",
 	});
 
 	// ---------------- emit-fatura ----------------
 	test("emit-fatura: sem children → fan-out (handleEmitFatura)", async () => {
 		const db = await mkDb();
-		const fatura = faturaFixture({ id: 1000, cobrancas: [
-			{ id: 1001, faturaId: 1000, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10", notas: [] },
-		] });
+		const fatura = faturaFixture({
+			id: 1000,
+			cobrancas: [
+				{
+					id: 1001,
+					faturaId: 1000,
+					valorTotal: 10000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "a-emitir" as const,
+					dataVencimento: "2026-09-10",
+					notas: [],
+				},
+			],
+		});
 		const enq = { nomes: [] as string[] };
-		const deps = { db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any };
+		const deps = {
+			db,
+			atacado: {
+				getFaturaPorId: mock(() => Promise.resolve(fatura)),
+			} as unknown as AtacadoPort,
+			asaas: {} as any,
+			nfcom: {} as any,
+		};
 		// moveToWaitingChildren=false: estaciona não pendura (children já prontos
 		// no teste) — retorna normalmente com {enfileiradas}.
-		const c = ctx("emit-fatura", { data: { faturaId: 1000 }, attemptsMade: 0, opts: {}, moveToWaitingChildren: async () => false }, async () => ({}), enq);
+		const c = ctx(
+			"emit-fatura",
+			{
+				data: { faturaId: 1000 },
+				attemptsMade: 0,
+				opts: {},
+				moveToWaitingChildren: async () => false,
+			},
+			async () => ({}),
+			enq,
+		);
 		const res = await processarJobEmissao(c, deps);
 		expect((res as any).enfileiradas).toBe(1);
 		expect(enq.nomes).toContain("emit-cobranca");
@@ -510,17 +971,49 @@ describe("A1 — dispatch processarJobEmissao (4 células reais, sem Redis)", ()
 
 	test("emit-fatura: fan-out + moveToWaitingChildren=true → WaitingChildrenError (estaciona após enfileirar)", async () => {
 		const db = await mkDb();
-		const fatura = faturaFixture({ id: 1050, cobrancas: [
-			{ id: 1051, faturaId: 1050, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10", notas: [] },
-		] });
+		const fatura = faturaFixture({
+			id: 1050,
+			cobrancas: [
+				{
+					id: 1051,
+					faturaId: 1050,
+					valorTotal: 10000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "a-emitir" as const,
+					dataVencimento: "2026-09-10",
+					notas: [],
+				},
+			],
+		});
 		const enq = { nomes: [] as string[] };
-		const deps = { db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any };
+		const deps = {
+			db,
+			atacado: {
+				getFaturaPorId: mock(() => Promise.resolve(fatura)),
+			} as unknown as AtacadoPort,
+			asaas: {} as any,
+			nfcom: {} as any,
+		};
 		// moveToWaitingChildren=true: havia children pendentes → estaciona.
-		const c = ctx("emit-fatura", { data: { faturaId: 1050 }, attemptsMade: 0, opts: {}, moveToWaitingChildren: async () => true }, async () => ({}), enq);
+		const c = ctx(
+			"emit-fatura",
+			{
+				data: { faturaId: 1050 },
+				attemptsMade: 0,
+				opts: {},
+				moveToWaitingChildren: async () => true,
+			},
+			async () => ({}),
+			enq,
+		);
 		let threw: unknown = null;
 		try {
 			await processarJobEmissao(c, deps);
-		} catch (e) { threw = e; }
+		} catch (e) {
+			threw = e;
+		}
 		// Fan-out enfileirou a cobrança antes de estacionar.
 		expect(enq.nomes).toContain("emit-cobranca");
 		expect(threw).toBeInstanceOf(WaitingChildrenError);
@@ -528,98 +1021,315 @@ describe("A1 — dispatch processarJobEmissao (4 células reais, sem Redis)", ()
 
 	test("emit-fatura: fan-out sem moveToWaitingChildren → WaitingChildrenError (fallback do stub)", async () => {
 		const db = await mkDb();
-		const fatura = faturaFixture({ id: 1052, cobrancas: [
-			{ id: 1053, faturaId: 1052, valorTotal: 10000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "a-emitir" as const, dataVencimento: "2026-09-10", notas: [] },
-		] });
+		const fatura = faturaFixture({
+			id: 1052,
+			cobrancas: [
+				{
+					id: 1053,
+					faturaId: 1052,
+					valorTotal: 10000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "a-emitir" as const,
+					dataVencimento: "2026-09-10",
+					notas: [],
+				},
+			],
+		});
 		const enq = { nomes: [] as string[] };
-		const deps = { db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any };
+		const deps = {
+			db,
+			atacado: {
+				getFaturaPorId: mock(() => Promise.resolve(fatura)),
+			} as unknown as AtacadoPort,
+			asaas: {} as any,
+			nfcom: {} as any,
+		};
 		// Sem moveToWaitingChildren (job real não injetado no stub) → fallback estaciona.
-		const c = ctx("emit-fatura", { data: { faturaId: 1052 }, attemptsMade: 0, opts: {} }, async () => ({}), enq);
+		const c = ctx(
+			"emit-fatura",
+			{ data: { faturaId: 1052 }, attemptsMade: 0, opts: {} },
+			async () => ({}),
+			enq,
+		);
 		let threw: unknown = null;
 		try {
 			await processarJobEmissao(c, deps);
-		} catch (e) { threw = e; }
+		} catch (e) {
+			threw = e;
+		}
 		expect(enq.nomes).toContain("emit-cobranca");
 		expect(threw).toBeInstanceOf(WaitingChildrenError);
 	});
 
 	test("emit-fatura: children + values → consolida (consolidarFaturaOuCobranca)", async () => {
 		const db = await mkDb();
-		const values = { "c1": { boletoOk: true, notasOk: [true] } };
-		const c = ctx("emit-fatura", {
-			data: { faturaId: 1002 }, attemptsMade: 1, opts: {},
-			getDependencies: async () => ({ processed: { c1: values.c1 }, unprocessed: [], failed: [] }),
-		}, async () => values as any, { nomes: [] });
-		const res = await processarJobEmissao(c, { db, atacado: {} as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any } as any);
+		const values = { c1: { boletoOk: true, notasOk: [true] } };
+		const c = ctx(
+			"emit-fatura",
+			{
+				data: { faturaId: 1002 },
+				attemptsMade: 1,
+				opts: {},
+				getDependencies: async () => ({
+					processed: { c1: values.c1 },
+					unprocessed: [],
+					failed: [],
+				}),
+			},
+			async () => values as any,
+			{ nomes: [] },
+		);
+		const res = await processarJobEmissao(c, {
+			db,
+			atacado: {} as unknown as AtacadoPort,
+			asaas: {} as any,
+			nfcom: {} as any,
+		} as any);
 		expect((res as any).status).toBe("emitida");
 	});
 
 	test("emit-fatura: children + values ausentes + child ativo → WaitingChildrenError (estaciona, sem custo de attempt)", async () => {
 		const db = await mkDb();
-		const c = ctx("emit-fatura", {
-			data: { faturaId: 1003 }, attemptsMade: 1, opts: {},
-			getDependencies: async () => ({ processed: {}, unprocessed: ["c1"], failed: [] }),
-		}, async () => ({}), { nomes: [] });
+		const c = ctx(
+			"emit-fatura",
+			{
+				data: { faturaId: 1003 },
+				attemptsMade: 1,
+				opts: {},
+				getDependencies: async () => ({
+					processed: {},
+					unprocessed: ["c1"],
+					failed: [],
+				}),
+			},
+			async () => ({}),
+			{ nomes: [] },
+		);
 		let threw: unknown = null;
 		try {
-			await processarJobEmissao(c, { db, atacado: {} as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any } as any);
-		} catch (e) { threw = e; }
+			await processarJobEmissao(c, {
+				db,
+				atacado: {} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+			} as any);
+		} catch (e) {
+			threw = e;
+		}
 		// Sem moveToWaitingChildren no stub → fallback estaciona (WaitingChildrenError).
 		expect(threw).toBeInstanceOf(WaitingChildrenError);
 	});
 
 	test("emit-fatura: children + values ausentes + moveToWaitingChildren=false → estado real (A2)", async () => {
 		const db = await mkDb();
-		const endereco = { logradouro: "R", numero: "1", bairro: "B", cep: "8", cidade: "C", uf: "PR" };
-		const fatura = faturaFixture({ id: 1090, cobrancas: [
-			{ id: 1091, faturaId: 1090, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "emitida" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 1092, cobrancaId: 1091, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "emitida" as const, total: 5000, itens: [] },
-			] },
-		] });
-		const c = ctx("emit-fatura", {
-			data: { faturaId: 1090 }, attemptsMade: 1, opts: {},
-			getDependencies: async () => ({ processed: {}, unprocessed: ["c1"], failed: [] }),
-			moveToWaitingChildren: async () => false,
-		}, async () => ({}), { nomes: [] });
+		const endereco = {
+			logradouro: "R",
+			numero: "1",
+			bairro: "B",
+			cep: "8",
+			cidade: "C",
+			uf: "PR",
+		};
+		const fatura = faturaFixture({
+			id: 1090,
+			cobrancas: [
+				{
+					id: 1091,
+					faturaId: 1090,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "emitida" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 1092,
+							cobrancaId: 1091,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "emitida" as const,
+							total: 5000,
+							itens: [],
+						},
+					],
+				},
+			],
+		});
+		const c = ctx(
+			"emit-fatura",
+			{
+				data: { faturaId: 1090 },
+				attemptsMade: 1,
+				opts: {},
+				getDependencies: async () => ({
+					processed: {},
+					unprocessed: ["c1"],
+					failed: [],
+				}),
+				moveToWaitingChildren: async () => false,
+			},
+			async () => ({}),
+			{ nomes: [] },
+		);
 		// moveToWaitingChildren=false → todos terminaram, values não visíveis → A2.
-		const res = await processarJobEmissao(c, { db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any } as any);
+		const res = await processarJobEmissao(c, {
+			db,
+			atacado: {
+				getFaturaPorId: mock(() => Promise.resolve(fatura)),
+			} as unknown as AtacadoPort,
+			asaas: {} as any,
+			nfcom: {} as any,
+		} as any);
 		expect((res as any).status).toBe("emitida");
 	});
 
 	test("emit-fatura: children + values ausentes + todos failed → estado real", async () => {
 		const db = await mkDb();
-		const endereco = { logradouro: "R", numero: "1", bairro: "B", cep: "8", cidade: "C", uf: "PR" };
-		const fatura = faturaFixture({ id: 1004, cobrancas: [
-			{ id: 1005, faturaId: 1004, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "emitida" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 1006, cobrancaId: 1005, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "emitida" as const, total: 5000, itens: [] },
-			] },
-			{ id: 1007, faturaId: 1004, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "erro" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 1008, cobrancaId: 1007, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "erro" as const, total: 5000, itens: [] },
-			] },
-		] });
-		const c = ctx("emit-fatura", {
-			data: { faturaId: 1004 }, attemptsMade: 4, opts: { attempts: 5 },
-			getDependencies: async () => ({ processed: {}, unprocessed: [], failed: ["c1", "c2"] }),
-		}, async () => ({}), { nomes: [] });
-		const res = await processarJobEmissao(c, { db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any } as any);
+		const endereco = {
+			logradouro: "R",
+			numero: "1",
+			bairro: "B",
+			cep: "8",
+			cidade: "C",
+			uf: "PR",
+		};
+		const fatura = faturaFixture({
+			id: 1004,
+			cobrancas: [
+				{
+					id: 1005,
+					faturaId: 1004,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "emitida" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 1006,
+							cobrancaId: 1005,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "emitida" as const,
+							total: 5000,
+							itens: [],
+						},
+					],
+				},
+				{
+					id: 1007,
+					faturaId: 1004,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "erro" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 1008,
+							cobrancaId: 1007,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "erro" as const,
+							total: 5000,
+							itens: [],
+						},
+					],
+				},
+			],
+		});
+		const c = ctx(
+			"emit-fatura",
+			{
+				data: { faturaId: 1004 },
+				attemptsMade: 4,
+				opts: { attempts: 5 },
+				getDependencies: async () => ({
+					processed: {},
+					unprocessed: [],
+					failed: ["c1", "c2"],
+				}),
+			},
+			async () => ({}),
+			{ nomes: [] },
+		);
+		const res = await processarJobEmissao(c, {
+			db,
+			atacado: {
+				getFaturaPorId: mock(() => Promise.resolve(fatura)),
+			} as unknown as AtacadoPort,
+			asaas: {} as any,
+			nfcom: {} as any,
+		} as any);
 		expect((res as any).status).toBe("parcial");
 	});
 
 	// ---------------- emit-cobranca ----------------
 	test("emit-cobranca: sem children → fan-out (handleEmitCobranca)", async () => {
 		const db = await mkDb();
-		const c = ctx("emit-cobranca", {
-			data: { cobrancaId: 1010, faturaId: 1009, valorTotal: 100, documentoDevedor: "1", nomeDevedor: "n", emailDevedor: "e", dataVencimento: "2026-09-10", notas: [
-				{ notaId: 1011, cpfcnpj: "1", nome: "x", uf: "PR", cidade: "C", logradouro: "R", numero: "1", bairro: "B", cep: "8", total: 100, itens: [] },
-			] },
-			attemptsMade: 0, opts: {},
-			moveToWaitingChildren: async () => false,
-		}, async () => ({}), { nomes: [] });
+		const c = ctx(
+			"emit-cobranca",
+			{
+				data: {
+					cobrancaId: 1010,
+					faturaId: 1009,
+					valorTotal: 100,
+					documentoDevedor: "1",
+					nomeDevedor: "n",
+					emailDevedor: "e",
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							notaId: 1011,
+							cpfcnpj: "1",
+							nome: "x",
+							uf: "PR",
+							cidade: "C",
+							logradouro: "R",
+							numero: "1",
+							bairro: "B",
+							cep: "8",
+							total: 100,
+							itens: [],
+						},
+					],
+				},
+				attemptsMade: 0,
+				opts: {},
+				moveToWaitingChildren: async () => false,
+			},
+			async () => ({}),
+			{ nomes: [] },
+		);
 		// asaas fake: resolve a key p/ não tentar criar boleto real
 		const { acquireKey, resolveKey } = await import("@emissor/db/idempotency");
 		await acquireKey(db, "cobranca:1010:boleto", "asaas");
 		await resolveKey(db, "cobranca:1010:boleto", "bol");
-		const deps = { db, atacado: {} as unknown as AtacadoPort, asaas: { consultarBoletoPorExternalReference: async () => ({ idExterno: "bol", linkFatura: "l" }) }, nfcom: {} as any } as any;
+		const deps = {
+			db,
+			atacado: {} as unknown as AtacadoPort,
+			asaas: {
+				consultarBoletoPorExternalReference: async () => ({
+					idExterno: "bol",
+					linkFatura: "l",
+				}),
+			},
+			nfcom: {} as any,
+		} as any;
 		const res = await processarJobEmissao(c, deps);
 		expect((res as any).notasEnfileiradas).toBe(1);
 	});
@@ -629,25 +1339,63 @@ describe("A1 — dispatch processarJobEmissao (4 células reais, sem Redis)", ()
 		const { acquireKey, resolveKey } = await import("@emissor/db/idempotency");
 		await acquireKey(db, "cobranca:1012:boleto", "asaas");
 		await resolveKey(db, "cobranca:1012:boleto", "bol");
-		const values = { "n1": { notaOk: true }, "n2": { notaOk: false } };
-		const c = ctx("emit-cobranca", {
-			data: { cobrancaId: 1012, faturaId: 1009 }, attemptsMade: 1, opts: {},
-			getDependencies: async () => ({ processed: { n1: values.n1, n2: values.n2 }, unprocessed: [], failed: [] }),
-		}, async () => values as any, { nomes: [] });
-		const res = await processarJobEmissao(c, { db, atacado: {} as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any } as any);
-		expect(res).toEqual({ boletoOk: true, notasOk: [true, false], erro: undefined });
+		const values = { n1: { notaOk: true }, n2: { notaOk: false } };
+		const c = ctx(
+			"emit-cobranca",
+			{
+				data: { cobrancaId: 1012, faturaId: 1009 },
+				attemptsMade: 1,
+				opts: {},
+				getDependencies: async () => ({
+					processed: { n1: values.n1, n2: values.n2 },
+					unprocessed: [],
+					failed: [],
+				}),
+			},
+			async () => values as any,
+			{ nomes: [] },
+		);
+		const res = await processarJobEmissao(c, {
+			db,
+			atacado: {} as unknown as AtacadoPort,
+			asaas: {} as any,
+			nfcom: {} as any,
+		} as any);
+		expect(res).toEqual({
+			boletoOk: true,
+			notasOk: [true, false],
+			erro: undefined,
+		});
 	});
 
 	test("emit-cobranca: children + values ausentes + child ativo → WaitingChildrenError (estaciona, sem custo de attempt)", async () => {
 		const db = await mkDb();
-		const c = ctx("emit-cobranca", {
-			data: { cobrancaId: 1013, faturaId: 1009 }, attemptsMade: 1, opts: {},
-			getDependencies: async () => ({ processed: {}, unprocessed: ["n1"], failed: [] }),
-		}, async () => ({}), { nomes: [] });
+		const c = ctx(
+			"emit-cobranca",
+			{
+				data: { cobrancaId: 1013, faturaId: 1009 },
+				attemptsMade: 1,
+				opts: {},
+				getDependencies: async () => ({
+					processed: {},
+					unprocessed: ["n1"],
+					failed: [],
+				}),
+			},
+			async () => ({}),
+			{ nomes: [] },
+		);
 		let threw: unknown = null;
 		try {
-			await processarJobEmissao(c, { db, atacado: {} as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any } as any);
-		} catch (e) { threw = e; }
+			await processarJobEmissao(c, {
+				db,
+				atacado: {} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+			} as any);
+		} catch (e) {
+			threw = e;
+		}
 		// Sem moveToWaitingChildren no stub → fallback estaciona (WaitingChildrenError).
 		expect(threw).toBeInstanceOf(WaitingChildrenError);
 	});
@@ -657,17 +1405,66 @@ describe("A1 — dispatch processarJobEmissao (4 células reais, sem Redis)", ()
 		const { acquireKey, resolveKey } = await import("@emissor/db/idempotency");
 		await acquireKey(db, "cobranca:1014:boleto", "asaas");
 		await resolveKey(db, "cobranca:1014:boleto", "bol");
-		const endereco = { logradouro: "R", numero: "1", bairro: "B", cep: "8", cidade: "C", uf: "PR" };
-		const fatura = faturaFixture({ id: 1015, cobrancas: [
-			{ id: 1014, faturaId: 1015, valorTotal: 100, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "emitida" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 1016, cobrancaId: 1014, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "emitida" as const, total: 100, itens: [] },
-			] },
-		] });
-		const c = ctx("emit-cobranca", {
-			data: { cobrancaId: 1014, faturaId: 1015 }, attemptsMade: 4, opts: { attempts: 5 },
-			getDependencies: async () => ({ processed: {}, unprocessed: [], failed: ["n1"] }),
-		}, async () => ({}), { nomes: [] });
-		const res = await processarJobEmissao(c, { db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any } as any);
+		const endereco = {
+			logradouro: "R",
+			numero: "1",
+			bairro: "B",
+			cep: "8",
+			cidade: "C",
+			uf: "PR",
+		};
+		const fatura = faturaFixture({
+			id: 1015,
+			cobrancas: [
+				{
+					id: 1014,
+					faturaId: 1015,
+					valorTotal: 100,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "emitida" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 1016,
+							cobrancaId: 1014,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "emitida" as const,
+							total: 100,
+							itens: [],
+						},
+					],
+				},
+			],
+		});
+		const c = ctx(
+			"emit-cobranca",
+			{
+				data: { cobrancaId: 1014, faturaId: 1015 },
+				attemptsMade: 4,
+				opts: { attempts: 5 },
+				getDependencies: async () => ({
+					processed: {},
+					unprocessed: [],
+					failed: ["n1"],
+				}),
+			},
+			async () => ({}),
+			{ nomes: [] },
+		);
+		const res = await processarJobEmissao(c, {
+			db,
+			atacado: {
+				getFaturaPorId: mock(() => Promise.resolve(fatura)),
+			} as unknown as AtacadoPort,
+			asaas: {} as any,
+			nfcom: {} as any,
+		} as any);
 		expect(res).toEqual({ boletoOk: true, notasOk: [true], erro: undefined });
 	});
 });
@@ -682,39 +1479,130 @@ describe("A2 — fallback pelo estado real (children exaustos sem values)", () =
 		const { acquireLease } = await import("@emissor/db/lease");
 		await acquireLease(db, 970); // o parent detém o lease da 1ª passada
 		const { queue, eventos } = fakeQueue();
-		const endereco = { logradouro: "R", numero: "1", bairro: "B", cep: "8", cidade: "C", uf: "PR" };
-		const fatura = faturaFixture({ id: 970, cobrancas: [
-			{ id: 971, faturaId: 970, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "emitida" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 972, cobrancaId: 971, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "emitida" as const, total: 5000, itens: [] },
-			] },
-			{ id: 973, faturaId: 970, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "erro" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 974, cobrancaId: 973, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "erro" as const, total: 5000, itens: [] },
-			] },
-		] });
+		const endereco = {
+			logradouro: "R",
+			numero: "1",
+			bairro: "B",
+			cep: "8",
+			cidade: "C",
+			uf: "PR",
+		};
+		const fatura = faturaFixture({
+			id: 970,
+			cobrancas: [
+				{
+					id: 971,
+					faturaId: 970,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "emitida" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 972,
+							cobrancaId: 971,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "emitida" as const,
+							total: 5000,
+							itens: [],
+						},
+					],
+				},
+				{
+					id: 973,
+					faturaId: 970,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "erro" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 974,
+							cobrancaId: 973,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "erro" as const,
+							total: 5000,
+							itens: [],
+						},
+					],
+				},
+			],
+		});
 		const res = await consolidarFaturaPorEstado(
-			{ data: { faturaId: 970 }, attemptsMade: 4, opts: { attempts: 5 } } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any, queue },
+			{
+				data: { faturaId: 970 },
+				attemptsMade: 4,
+				opts: { attempts: 5 },
+			} as any,
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(fatura)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+				queue,
+			},
 		);
 		expect(res.status).toBe("parcial");
 		const { drainOutbox } = await import("@emissor/db/outbox");
 		const msgs = await drainOutbox(db, 20);
-		expect(msgs.some((m) => (m.payload as any).op === "atualizarStatusFatura" && (m.payload as any).status === "parcial")).toBe(true);
-		expect(eventos.some((e) => e.tipo === "fatura.status" && e.estado === "parcial")).toBe(true);
+		expect(
+			msgs.some(
+				(m) =>
+					(m.payload as any).op === "atualizarStatusFatura" &&
+					(m.payload as any).status === "parcial",
+			),
+		).toBe(true);
+		expect(
+			eventos.some((e) => e.tipo === "fatura.status" && e.estado === "parcial"),
+		).toBe(true);
 		const { hasLease } = await import("@emissor/db/lease");
 		expect(await hasLease(db, 970)).toBe(false); // lease liberado (sem órfã)
 	});
 
 	test("consolidarFaturaPorEstado: fatura ausente → remenda a-emitir (defesa do lease)", async () => {
 		const db = await mkDb();
-		await import("@emissor/db/lease").then(({ acquireLease }) => acquireLease(db, 980));
+		await import("@emissor/db/lease").then(({ acquireLease }) =>
+			acquireLease(db, 980),
+		);
 		const res = await consolidarFaturaPorEstado(
-			{ data: { faturaId: 980 }, attemptsMade: 4, opts: { attempts: 5 } } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(null)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any },
+			{
+				data: { faturaId: 980 },
+				attemptsMade: 4,
+				opts: { attempts: 5 },
+			} as any,
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(null)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+			},
 		);
 		expect(res.status).toBe("a-emitir");
 		const { drainOutbox } = await import("@emissor/db/outbox");
 		const msgs = await drainOutbox(db, 20);
-		expect(msgs.some((m) => (m.payload as any).op === "atualizarStatusFatura" && (m.payload as any).status === "a-emitir")).toBe(true);
+		expect(
+			msgs.some(
+				(m) =>
+					(m.payload as any).op === "atualizarStatusFatura" &&
+					(m.payload as any).status === "a-emitir",
+			),
+		).toBe(true);
 		const { hasLease } = await import("@emissor/db/lease");
 		expect(await hasLease(db, 980)).toBe(false);
 	});
@@ -724,27 +1612,99 @@ describe("A2 — fallback pelo estado real (children exaustos sem values)", () =
 		const { acquireKey, resolveKey } = await import("@emissor/db/idempotency");
 		await acquireKey(db, "cobranca:991:boleto", "asaas");
 		await resolveKey(db, "cobranca:991:boleto", "bol_1");
-		const endereco = { logradouro: "R", numero: "1", bairro: "B", cep: "8", cidade: "C", uf: "PR" };
-		const fatura = faturaFixture({ id: 990, cobrancas: [
-			{ id: 991, faturaId: 990, valorTotal: 5000, nomeDevedor: "p", documentoDevedor: "1", emailDevedor: "e", status: "emitida" as const, dataVencimento: "2026-09-10", notas: [
-				{ id: 992, cobrancaId: 991, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "emitida" as const, total: 3000, itens: [] },
-				{ id: 993, cobrancaId: 991, nome: "n", cpfcnpj: "1", endereco, uf: "PR", cidade: "C", statusInterno: "erro" as const, total: 2000, itens: [] },
-			] },
-		] });
+		const endereco = {
+			logradouro: "R",
+			numero: "1",
+			bairro: "B",
+			cep: "8",
+			cidade: "C",
+			uf: "PR",
+		};
+		const fatura = faturaFixture({
+			id: 990,
+			cobrancas: [
+				{
+					id: 991,
+					faturaId: 990,
+					valorTotal: 5000,
+					nomeDevedor: "p",
+					documentoDevedor: "1",
+					emailDevedor: "e",
+					status: "emitida" as const,
+					dataVencimento: "2026-09-10",
+					notas: [
+						{
+							id: 992,
+							cobrancaId: 991,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "emitida" as const,
+							total: 3000,
+							itens: [],
+						},
+						{
+							id: 993,
+							cobrancaId: 991,
+							nome: "n",
+							cpfcnpj: "1",
+							endereco,
+							uf: "PR",
+							cidade: "C",
+							statusInterno: "erro" as const,
+							total: 2000,
+							itens: [],
+						},
+					],
+				},
+			],
+		});
 		const res = await consolidarCobrancaPorEstado(
-			{ data: { cobrancaId: 991, faturaId: 990 }, attemptsMade: 4, opts: { attempts: 5 } } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(fatura)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any },
+			{
+				data: { cobrancaId: 991, faturaId: 990 },
+				attemptsMade: 4,
+				opts: { attempts: 5 },
+			} as any,
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(fatura)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+			},
 		);
-		expect(res).toEqual({ boletoOk: true, notasOk: [true, false], erro: undefined });
+		expect(res).toEqual({
+			boletoOk: true,
+			notasOk: [true, false],
+			erro: undefined,
+		});
 	});
 
 	test("consolidarCobrancaPorEstado: boleto sem key + cobrança ausente → boletoOk false, notasOk vazio", async () => {
 		const db = await mkDb();
 		const res = await consolidarCobrancaPorEstado(
-			{ data: { cobrancaId: 995, faturaId: 994 }, attemptsMade: 4, opts: { attempts: 5 } } as any,
-			{ db, atacado: { getFaturaPorId: mock(() => Promise.resolve(null)) } as unknown as AtacadoPort, asaas: {} as any, nfcom: {} as any },
+			{
+				data: { cobrancaId: 995, faturaId: 994 },
+				attemptsMade: 4,
+				opts: { attempts: 5 },
+			} as any,
+			{
+				db,
+				atacado: {
+					getFaturaPorId: mock(() => Promise.resolve(null)),
+				} as unknown as AtacadoPort,
+				asaas: {} as any,
+				nfcom: {} as any,
+			},
 		);
-		expect(res).toEqual({ boletoOk: false, notasOk: [], erro: "boleto não emitido" });
+		expect(res).toEqual({
+			boletoOk: false,
+			notasOk: [],
+			erro: "boleto não emitido",
+		});
 	});
 });
 
@@ -755,7 +1715,9 @@ describe("A2 — fallback pelo estado real (children exaustos sem values)", () =
 describe("A4 — lease de outrem: re-entrada lança, 1ª entrada pula", () => {
 	const depsBase = (db: Awaited<ReturnType<typeof mkDb>>) => ({
 		db,
-		atacado: { getFaturaPorId: mock(() => Promise.resolve(null)) } as unknown as AtacadoPort,
+		atacado: {
+			getFaturaPorId: mock(() => Promise.resolve(null)),
+		} as unknown as AtacadoPort,
 		asaas: {} as any,
 		nfcom: {} as any,
 		enqueueFilho: async () => {},
@@ -768,7 +1730,11 @@ describe("A4 — lease de outrem: re-entrada lança, 1ª entrada pula", () => {
 		let threw: unknown = null;
 		try {
 			await handleEmitFatura(
-				{ data: { faturaId: 996 }, attemptsMade: 2, opts: { attempts: 5 } } as any,
+				{
+					data: { faturaId: 996 },
+					attemptsMade: 2,
+					opts: { attempts: 5 },
+				} as any,
 				depsBase(db),
 			);
 		} catch (e) {
@@ -784,7 +1750,12 @@ describe("A4 — lease de outrem: re-entrada lança, 1ª entrada pula", () => {
 		const enqueued: string[] = [];
 		const res = await handleEmitFatura(
 			{ data: { faturaId: 997 }, attemptsMade: 0, opts: {} } as any,
-			{ ...depsBase(db), enqueueFilho: async (n: string) => { enqueued.push(n); } },
+			{
+				...depsBase(db),
+				enqueueFilho: async (n: string) => {
+					enqueued.push(n);
+				},
+			},
 		);
 		expect(res.enfileiradas).toBe(0);
 		expect(enqueued.length).toBe(0);
@@ -794,11 +1765,15 @@ describe("A4 — lease de outrem: re-entrada lança, 1ª entrada pula", () => {
 describe("B — numeroDaChave (nNF da chave de acesso)", () => {
 	test("chave de 44 díg. → nº na posição 26-34", () => {
 		// nNF = 129 (dígitos 26-34).
-		expect(numeroDaChave("42260819782703000147620010000001291000000012")).toBe(129);
+		expect(numeroDaChave("42260819782703000147620010000001291000000012")).toBe(
+			129,
+		);
 	});
 
 	test("chave com nNF 122 → 122", () => {
-		expect(numeroDaChave("42260819782703000147620010000001221000000012")).toBe(122);
+		expect(numeroDaChave("42260819782703000147620010000001221000000012")).toBe(
+			122,
+		);
 	});
 
 	test("chave ausente → undefined", () => {
@@ -811,7 +1786,9 @@ describe("B — numeroDaChave (nNF da chave de acesso)", () => {
 	});
 
 	test("nNF zerado → undefined (não assume 0)", () => {
-		expect(numeroDaChave("42260819782703000147620010000000001000000012")).toBeUndefined();
+		expect(
+			numeroDaChave("42260819782703000147620010000000001000000012"),
+		).toBeUndefined();
 	});
 });
 
@@ -822,18 +1799,50 @@ describe("B — reconciliação de duplicidade grava numero da chave", () => {
 		// Chave com nNF=122; inspeção (/api/lista) devolve só chave/protocolo (sem numero).
 		const chave = "42260819782703000147620010000001221000000012";
 		const nfcom = {
-			emitirNFCom: mock(() => Promise.reject(new Error("Duplicidade de NFCom [nProt: 999]"))),
-			consultarLista: mock(() => Promise.resolve([{ chave, situacao: "autorizada", protocolo: "P123" }])),
+			emitirNFCom: mock(() =>
+				Promise.reject(new Error("Duplicidade de NFCom [nProt: 999]")),
+			),
+			consultarLista: mock(() =>
+				Promise.resolve([{ chave, situacao: "autorizada", protocolo: "P123" }]),
+			),
 		} as unknown as NfcomPort;
 		const res = await handleEmitNfcom(
-			{ data: { notaId: 800, cobrancaId: 801, faturaId: 802, destinatario: { nome: "n", cpfcnpj: "11444777000161", uf: "PR", cidade: "C", logradouro: "R", numero: "1", bairro: "B", cep: "8" }, itens: [], total: 100 } as any, attemptsMade: 0, opts: {} } as any,
-			{ db, nfcom, atacado: {} as unknown as AtacadoPort, asaas: {} as any, queue },
+			{
+				data: {
+					notaId: 800,
+					cobrancaId: 801,
+					faturaId: 802,
+					destinatario: {
+						nome: "n",
+						cpfcnpj: "11444777000161",
+						uf: "PR",
+						cidade: "C",
+						logradouro: "R",
+						numero: "1",
+						bairro: "B",
+						cep: "8",
+					},
+					itens: [],
+					total: 100,
+				} as any,
+				attemptsMade: 0,
+				opts: {},
+			} as any,
+			{
+				db,
+				nfcom,
+				atacado: {} as unknown as AtacadoPort,
+				asaas: {} as any,
+				queue,
+			},
 		);
 		expect(res.notaOk).toBe(true);
 		expect(res.statusInterno).toBe("emitida");
 		const { drainOutbox } = await import("@emissor/db/outbox");
 		const msgs = await drainOutbox(db, 20);
-		const atualiza = msgs.find((m) => (m.payload as any).op === "atualizarStatusNota");
+		const atualiza = msgs.find(
+			(m) => (m.payload as any).op === "atualizarStatusNota",
+		);
 		expect(atualiza).toBeTruthy();
 		expect((atualiza!.payload as any).numero).toBe(122);
 		expect((atualiza!.payload as any).chave).toBe(chave);
@@ -844,15 +1853,51 @@ describe("B — reconciliação de duplicidade grava numero da chave", () => {
 		const db = await mkDb();
 		const { queue } = fakeQueue();
 		const nfcom = {
-			emitirNFCom: mock(() => Promise.resolve({ situacao: "autorizada", numero: 321, serie: 1, chave: "42260819782703000147620010000001221000000012", protocolo: "P" })),
+			emitirNFCom: mock(() =>
+				Promise.resolve({
+					situacao: "autorizada",
+					numero: 321,
+					serie: 1,
+					chave: "42260819782703000147620010000001221000000012",
+					protocolo: "P",
+				}),
+			),
 		} as unknown as NfcomPort;
 		await handleEmitNfcom(
-			{ data: { notaId: 810, cobrancaId: 801, faturaId: 802, destinatario: { nome: "n", cpfcnpj: "11444777000161", uf: "PR", cidade: "C", logradouro: "R", numero: "1", bairro: "B", cep: "8" }, itens: [], total: 100 } as any, attemptsMade: 0, opts: {} } as any,
-			{ db, nfcom, atacado: {} as unknown as AtacadoPort, asaas: {} as any, queue },
+			{
+				data: {
+					notaId: 810,
+					cobrancaId: 801,
+					faturaId: 802,
+					destinatario: {
+						nome: "n",
+						cpfcnpj: "11444777000161",
+						uf: "PR",
+						cidade: "C",
+						logradouro: "R",
+						numero: "1",
+						bairro: "B",
+						cep: "8",
+					},
+					itens: [],
+					total: 100,
+				} as any,
+				attemptsMade: 0,
+				opts: {},
+			} as any,
+			{
+				db,
+				nfcom,
+				atacado: {} as unknown as AtacadoPort,
+				asaas: {} as any,
+				queue,
+			},
 		);
 		const { drainOutbox } = await import("@emissor/db/outbox");
 		const msgs = await drainOutbox(db, 20);
-		const atualiza = msgs.find((m) => (m.payload as any).op === "atualizarStatusNota");
+		const atualiza = msgs.find(
+			(m) => (m.payload as any).op === "atualizarStatusNota",
+		);
 		// numero 321 (do gateway), não 122 (derivado da chave).
 		expect((atualiza!.payload as any).numero).toBe(321);
 	});
