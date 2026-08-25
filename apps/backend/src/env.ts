@@ -65,7 +65,7 @@ const _env = createEnv({
 		// env, o campo `rgie` vai omitido no payload; com ela, o valor é enviado
 		// como IE do destinatário. Confirmar com contador/provedor (o boot NÃO
 		// depende dela — `emptyStringAsUndefined` já trata vazio como ausente).
-		FISCAL_IE_ISENTO: z.string().optional(),
+		FISCAL_IE_ISENTO: z.string().optional().default("ISENTO"),
 
 		// Logging (ADR-0008): nível default `info`, habilitável por env.
 		LOG_LEVEL: z
