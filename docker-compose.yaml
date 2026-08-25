@@ -1,0 +1,66 @@
+# Produção: sobe app (imagem buildada do Dockerfile, bundle autocontido) + Redis
+# irmão + SQLite de coordenação em volume persistente. Sem hot-reload, sem túnel
+# (tráfego entra pela infra de deploy normal).
+#
+# Single-instance (ADR-0002/0003): NÃO escalar réplicas — o SQLite de coordenação
+# (/app/data) não é compartilhável entre pods. Escalar = ADR futuro de migração
+# p/ Postgres.
+#
+# Uso: docker compose -f docker-compose.yaml up -d
+# Env produção: preencha .env (copie de .env.example) com secrets reais.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Sem `ports`: o Redis fica só na rede interna do compose (serviço `redis`).
+    # O app o alcança via redis://redis:6379. Em prod, preferir Redis durável/
+    # gerenciado; este serviço irmão cobre single-instance simples (BullMQ perde
+    # jobs em Redis volátil — ADR-0002).
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      # Override do .env: dentro do compose o Redis é o serviço `redis`, não
+      # localhost. Os demais secrets vêm do .env via env_file.
+      REDIS_URL: redis://redis:6379
+      # Bate com o EXPOSE 3000 do Dockerfile. Em prod, a infra de deploy espelha
+      # a porta (load balancer / ingress). Sem bind p/ host — o tráfego entra pela
+      # porta exposta do serviço, não por localhost.
+      PORT: "3000"
+      # SQLite de coordenação em volume nomeado persistente. O Dockerfile declara
+      # VOLUME /app/data; este volume nomeado o substancia. Mesmo caminho do
+      # Dockerfile (DATABASE_URL=/app/data/emissor.db).
+      DATABASE_URL: "/app/data/emissor.db"
+      NODE_ENV: production
+    # Sem `ports`: porta exposta na rede do compose, alcançada pelo serviço
+    # (ingress/lb externo) — não publicada no host. Se precisar mapear p/ a porta
+    # do host, descomente e ajuste:
+    # ports:
+    #   - "3000:3000"
+    volumes:
+      # SQLite de coordenação persistente (idempotency keys, outbox, lease —
+      # ADR-0003). Perder = perder a garantia anti-duplicação de boletos/notas.
+      - db-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # O CMD do Dockerfile já roda `bunx drizzle-kit migrate && bun run dist/index.js`
+    # (migra o SQLite de coordenação idempotentemente antes de subir o server).
+
+volumes:
+  redis-data:
+  db-data:

@@ -1,6 +1,7 @@
 # Dev local: sobe Redis + app (com hot-reload via `bun --watch`) + tunnel Cloudflare
-# (preview URL pública) num único pod. `bun dev` roda `docker compose up`. Produção
-# usa só o Dockerfile (bundle autocontido); este compose é tooling de desenvolvimento.
+# (preview URL pública) num único pod. `bun dev` roda `docker compose -f
+# docker-compose.dev.yaml up`. Produção usa só o Dockerfile (bundle autocontido);
+# este compose é tooling de desenvolvimento.
 #
 # Single-instance (ADR-0002/0003): NÃO escalar réplicas — o SQLite de coordenação
 # (/app/data) não é compartilhável entre pods.

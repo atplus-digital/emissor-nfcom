@@ -24,10 +24,14 @@ import type {
 	CriarNotaInput,
 	ErroEmissao,
 	FaturaResumo,
+	FiltroClientes,
 	FiltroFaturas,
+	ListaPaginada,
+	Paginacao,
 	ParceiroResumo,
 	RegistrarErroInput,
 } from "#/domain/ports/atacado.port";
+import { mascararDoc } from "#/domain/fatura/cpf-cnpj";
 import type { Cliente, Fatura, Parceiro, Plano } from "#/domain/types";
 import type { AtacadoClient } from "./atacado.client";
 import { AtacadoError } from "./atacado.client";
@@ -82,6 +86,50 @@ export class AtacadoRepository implements AtacadoPort {
 			// lista vazia (a rota vira 422 VALIDACAO, SPEC-0002 caso 2). Outros
 			// erros (5xx, etc.) propagam — são retryable/fatal no worker.
 			if (err instanceof AtacadoError && err.statusCode === 404) return [];
+			throw err;
+		}
+	}
+
+	async listarClientesParceiro(
+		parceiroId: number,
+		filtro: FiltroClientes,
+		pagina: Paginacao,
+	): Promise<ListaPaginada<Cliente>> {
+		// Filter com SÓ os campos presentes (NocoBase: campo ausente não
+		// filtra) — mesmo padrão de listarFaturas.
+		const filter: Record<string, unknown> = { f_fk_parceiro: parceiroId };
+		if (filtro.busca) {
+			// Busca por nome OU fantasia (contém, case-insensitive no NocoBase).
+			filter.$or = [
+				{ f_nome_razao: { $like: `%${filtro.busca}%` } },
+				{ f_fantasia: { $like: `%${filtro.busca}%` } },
+			];
+		}
+		if (filtro.cpfcnpj) {
+			// O CRM armazena o documento mascarado (ex.: "003.436.809-47") —
+			// o filtro de igualdade precisa do MESMO formato (mascararDoc é
+			// idempotente: aceita dígitos ou mascarado).
+			filter.f_cpf_cnpj = mascararDoc(filtro.cpfcnpj);
+		}
+		if (filtro.cidade) filter.f_cidade = filtro.cidade;
+		if (filtro.uf) filter.f_uf = filtro.uf.toUpperCase();
+		try {
+			const { items, total } = await this.client.listPage(COL.clientes, {
+				filter,
+				appends: ["f_linhas_fixas", "f_linhas_fixas.f_planos_de_servico"],
+				page: pagina.page,
+				pageSize: pagina.pageSize,
+			});
+			return {
+				itens: (items as ClienteExterno[]).map(clienteToDomain),
+				total,
+			};
+		} catch (err) {
+			// NocoBase responde 404 em `list` quando não há clientes do parceiro
+			// → página vazia com total 0 (idem buscarClientesAtivosPorParceiro).
+			if (err instanceof AtacadoError && err.statusCode === 404) {
+				return { itens: [], total: 0 };
+			}
 			throw err;
 		}
 	}

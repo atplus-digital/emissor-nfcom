@@ -111,6 +111,36 @@ export interface FiltroFaturas {
 }
 
 /**
+ * Filtro da listagem de clientes de um parceiro (painel). Todos os campos
+ * são opcionais — a lista só filtra pelos campos presentes (além do parceiro).
+ */
+export interface FiltroClientes {
+	/** Busca textual por nome/razão social ou fantasia (contém, case-insensitive). */
+	busca?: string;
+	/** CPF/CNPJ exato — mascarado ou dígitos (o módulo normaliza p/ o formato armazenado). */
+	cpfcnpj?: string;
+	/** Cidade exata. */
+	cidade?: string;
+	/** UF exata (2 letras). */
+	uf?: string;
+}
+
+/** Paginação 1-based da listagem (painel). */
+export interface Paginacao {
+	/** Página atual (1 = primeira). */
+	page: number;
+	/** Itens por página. */
+	pageSize: number;
+}
+
+/** Resultado de listagem paginada: itens da página + total do filtro. */
+export interface ListaPaginada<T> {
+	itens: T[];
+	/** Total de registros que casam com o filtro (todas as páginas). */
+	total: number;
+}
+
+/**
  * Resumo de fatura p/ listagem do painel — sem a árvore (cobranças/notas/itens
  * ficam para o detalhe, `getFaturaPorId`). Monetário em centavos (ADR-0004).
  */
@@ -155,7 +185,22 @@ export interface ErroEmissao {
 export interface AtacadoPort {
 	// Leitura (fonte de domínio)
 	buscarParceiroPorId(parceiroId: number): Promise<Parceiro | null>;
+	/**
+	 * TODOS os clientes do parceiro (leitura completa — paginação fake do
+	 * `list`). Usado na preparação da fatura, que precisa da base inteira.
+	 */
 	buscarClientesAtivosPorParceiro(parceiroId: number): Promise<Cliente[]>;
+	/**
+	 * Clientes do parceiro com filtro + paginação de verdade (painel —
+	 * `GET /api/parceiros/:id/clientes`). `total` = clientes que casam com o
+	 * filtro (todas as páginas). `{ itens: [], total: 0 }` quando o Atacado
+	 * responde 404 (parceiro sem clientes).
+	 */
+	listarClientesParceiro(
+		parceiroId: number,
+		filtro: FiltroClientes,
+		pagina: Paginacao,
+	): Promise<ListaPaginada<Cliente>>;
 	buscarPlanosDeServico(): Promise<Plano[]>;
 	buscarFaturaPorChave(
 		parceiroId: number,

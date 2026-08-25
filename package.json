@@ -10,7 +10,7 @@
 		"#/*": "./apps/backend/src/*"
 	},
 	"scripts": {
-		"dev": "docker compose up",
+		"dev": "docker compose -f docker-compose.dev.yaml up",
 		"dev:native": "bun --watch apps/backend/src/index.ts",
 		"build": "bun build apps/backend/src/index.ts --outdir dist --target bun",
 		"viewer:dev": "bun run --cwd apps/viewer dev",

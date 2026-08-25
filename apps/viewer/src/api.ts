@@ -1,5 +1,6 @@
 import type {
-	ClienteView,
+	ClientesFiltro,
+	ClientesPaginadas,
 	EmissaoView,
 	EmitirResultado,
 	FaturaDetalhe,
@@ -139,11 +140,21 @@ export async function getParceiro(
 	);
 }
 
+/** Listagem paginada dos clientes do parceiro, com filtros opcionais. */
 export async function listClientes(
 	parceiroId: number | string,
-): Promise<ClienteView[]> {
-	return request<ClienteView[]>(
-		`/api/parceiros/${encodeURIComponent(String(parceiroId))}/clientes`,
+	opts?: ({ pagina?: number; pageSize?: number } & ClientesFiltro) | null,
+): Promise<ClientesPaginadas> {
+	const params = new URLSearchParams();
+	if (opts?.pagina) params.set("page", String(opts.pagina));
+	if (opts?.pageSize) params.set("pageSize", String(opts.pageSize));
+	if (opts?.busca) params.set("busca", opts.busca);
+	if (opts?.cpfcnpj) params.set("cpfcnpj", opts.cpfcnpj);
+	if (opts?.cidade) params.set("cidade", opts.cidade);
+	if (opts?.uf) params.set("uf", opts.uf);
+	const qs = params.toString();
+	return request<ClientesPaginadas>(
+		`/api/parceiros/${encodeURIComponent(String(parceiroId))}/clientes${qs ? `?${qs}` : ""}`,
 	);
 }
 

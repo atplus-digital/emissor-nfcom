@@ -80,6 +80,7 @@ export function fakeAtacado(over: Partial<AtacadoPort> = {}): AtacadoPort {
 	return {
 		buscarParceiroPorId: async () => parceiroFixture(),
 		buscarClientesAtivosPorParceiro: async () => [clienteFixture()],
+		listarClientesParceiro: async () => ({ itens: [clienteFixture()], total: 1 }),
 		buscarPlanosDeServico: async () => [planoFixture()],
 		buscarFaturaPorChave: async () => null,
 		getFaturaPorId: async () => null,

@@ -39,11 +39,12 @@ com idempotência/outbox (SQLite). Stack: Bun + Hono + Drizzle + Zod 4. Interno 
 ```bash
 cp .env.example .env            # preencher keys (Asaas, NFCom, Atacado...)
 bun install
-bun run dev     # docker compose up: Redis + app (Hono :3000 + workers, bun --watch)
+bun run dev     # docker compose -f docker-compose.dev.yaml up: Redis + app
+                # (Hono :3000 + workers, bun --watch)
                 # — migra o SQLite de coordenação no boot (drizzle-kit migrate)
                 # — sobe também o serviço `tunnel` (cloudflared): preview público
                 #   em https://<id>.trycloudflare.com (URL nos logs do serviço)
-# URL do preview: docker compose logs tunnel | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1
+# URL do preview: docker compose -f docker-compose.dev.yaml logs tunnel | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1
 # Sem Docker: bun dev:native (Redis à parte; requer bunx drizzle-kit migrate)
 ```
 
@@ -65,7 +66,7 @@ bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
   Flow skipIf e o wiring dos workers sai do denominador → o gate falha (por
   design, evita false pass). Sobe o Redis com
   `docker run -d --name emissor-test-redis -p 6379:6379 redis:7-alpine`
-  (o Redis do `compose.yaml` não tem port no host). `bun run test` (sem
+  (o Redis do `docker-compose.dev.yaml` não tem port no host). `bun run test` (sem
   coverage) segue verde sem Redis.
 - Falha de gate = **exit 1 sem mensagem** (bug do Bun, oven-sh/bun#17028) — a
   tabela por arquivo ainda imprime; procure a linha abaixo do threshold.
@@ -97,6 +98,9 @@ bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
   — conversão só no translator do módulo `atacado` (ADR-0004).
 - Nota tem DOIS campos de status: `f_status_interno` (máquina interna) e `f_situacao`
   (espelho do gateway) — não misturar (SPEC-0001).
+- `test:http/_helpers.ts` também cai no gate de cobertura: método novo na `AtacadoPort`
+  exige default no `fakeAtacado` E ao menos um teste que **chame** o default
+  (testes que sobrescrevem o método não cobrem a linha do default).
 - `bun test --isolate` é o runner canônico (script `test`).
 
 ## Mapa de contexto

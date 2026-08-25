@@ -34,6 +34,7 @@ describe("portas de domínio (contrato que módulos implementam)", () => {
 				},
 			}),
 			buscarClientesAtivosPorParceiro: async () => [],
+			listarClientesParceiro: async () => ({ itens: [], total: 0 }),
 			buscarPlanosDeServico: async () => [],
 			buscarFaturaPorChave: async () => null,
 			criarFatura: async () => ({ id: 1 }),
@@ -49,6 +50,7 @@ describe("portas de domínio (contrato que módulos implementam)", () => {
 		const methods = [
 			"buscarParceiroPorId",
 			"buscarClientesAtivosPorParceiro",
+			"listarClientesParceiro",
 			"buscarPlanosDeServico",
 			"buscarFaturaPorChave",
 			"criarFatura",

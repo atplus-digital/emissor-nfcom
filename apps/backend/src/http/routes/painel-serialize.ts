@@ -15,13 +15,11 @@ import type {
 } from "#/domain/ports/atacado.port";
 import { serializarEmissao, type EmissaoResponse } from "./faturas.route";
 
-/** Documento limpo → mascarado (CPF 11 dígitos; CNPJ 14; demais → não altera). */
-export function mascararDoc(doc: string): string {
-	const d = doc.replace(/\D/g, "");
-	if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
-	if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
-	return doc;
-}
+import { mascararDoc } from "#/domain/fatura/cpf-cnpj";
+
+/** Documento limpo → mascarado — a implementação canônica é do domínio
+ * (`#/domain/fatura/cpf-cnpj`); re-exportada aqui p/ os callers da UI. */
+export { mascararDoc };
 
 /** Resumo de fatura p/ a listagem (valores em reais, 2 casas). */
 export interface FaturaListaItem {
@@ -210,6 +208,33 @@ export function serializarClienteLista(clientes: Cliente[]): ClienteListaItem[] 
 			quantidade: l.quantidade,
 		})),
 	}));
+}
+
+/**
+ * Lista paginada de clientes ativos
+ * (GET /painel/api/parceiros/:id/clientes?page=&pageSize=&busca=&cpfcnpj=&cidade=&uf=).
+ * `total` = clientes que casam com o filtro (todas as páginas).
+ */
+export interface ClienteListaPaginada {
+	itens: ClienteListaItem[];
+	total: number;
+	page: number;
+	pageSize: number;
+	/** `ceil(total / pageSize)`, mínimo 1 (página 1 existe mesmo sem itens). */
+	totalPaginas: number;
+}
+
+export function serializarClienteListaPaginada(
+	clientes: Cliente[],
+	meta: { total: number; page: number; pageSize: number },
+): ClienteListaPaginada {
+	return {
+		itens: serializarClienteLista(clientes),
+		total: meta.total,
+		page: meta.page,
+		pageSize: meta.pageSize,
+		totalPaginas: Math.max(1, Math.ceil(meta.total / meta.pageSize)),
+	};
 }
 
 /** Item da forma bruta do preparo (centavos inteiros — domínio). */

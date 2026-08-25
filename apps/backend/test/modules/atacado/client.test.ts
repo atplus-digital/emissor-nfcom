@@ -245,3 +245,72 @@ describe("atacado.client · list (envolvido ou array direto)", () => {
 		await expect(client.list("t_clientes", {})).rejects.toBeInstanceOf(AtacadoError);
 	});
 });
+
+describe("atacado.client · listPage (paginação real + total do filtro)", () => {
+	it("envolvido { data, meta } → items da página + total do meta.count", async () => {
+		const f = fakeFetch({
+			status: 200,
+			body: {
+				data: [{ id: 1 }, { id: 2 }],
+				meta: { count: 42, page: 2, pageSize: 2, totalPage: 21 },
+			},
+		});
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		const r = await client.listPage("t_clientes", {
+			filter: { f_fk_parceiro: 42 },
+			page: 2,
+			pageSize: 2,
+		});
+		expect(r.items).toEqual([{ id: 1 }, { id: 2 }]);
+		expect(r.total).toBe(42);
+	});
+
+	it("array direto (sem meta) → total degrada p/ tamanho da página", async () => {
+		const f = fakeFetch({ status: 200, body: [{ id: 9 }, { id: 10 }] });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		const r = await client.listPage("t_clientes", { pageSize: 5 });
+		expect(r.items).toEqual([{ id: 9 }, { id: 10 }]);
+		expect(r.total).toBe(2);
+	});
+
+	it("page/pageSize entram na query (sem o default 9999); sem page → 1", async () => {
+		const f = fakeFetch({ status: 200, body: { data: [] } });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await client.listPage("t_clientes", { page: 3, pageSize: 7 });
+		let params = new URL(
+			(f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string,
+		).searchParams;
+		expect(params.get("page")).toBe("3");
+		expect(params.get("pageSize")).toBe("7");
+
+		const f2 = fakeFetch({ status: 200, body: { data: [] } });
+		const client2 = createAtacadoClient({ fetchImpl: f2, ...NO_ENV_OPTS });
+		await client2.listPage("t_clientes", { pageSize: 7 });
+		params = new URL(
+			(f2 as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string,
+		).searchParams;
+		expect(params.get("page")).toBe("1");
+		expect(params.get("pageSize")).toBe("7");
+	});
+
+	it("filter (objeto) → JSON na query", async () => {
+		const f = fakeFetch({ status: 200, body: { data: [] } });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await client.listPage("t_clientes", {
+			filter: { f_uf: { $eq: "PR" } },
+			pageSize: 10,
+		});
+		const params = new URL(
+			(f as unknown as ReturnType<typeof mock>).mock.calls[0][0] as string,
+		).searchParams;
+		expect(params.get("filter")).toBe(JSON.stringify({ f_uf: { $eq: "PR" } }));
+	});
+
+	it("listPage não-2xx → AtacadoError", async () => {
+		const f = fakeFetch({ status: 500, text: "boom" });
+		const client = createAtacadoClient({ fetchImpl: f, ...NO_ENV_OPTS });
+		await expect(
+			client.listPage("t_clientes", { pageSize: 10 }),
+		).rejects.toBeInstanceOf(AtacadoError);
+	});
+});

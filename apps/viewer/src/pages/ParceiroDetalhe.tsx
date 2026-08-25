@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, getParceiro, listClientes } from "../api";
 import { MoneyReais } from "../components/Money";
@@ -11,6 +11,8 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
 	Table,
 	TableBody,
@@ -20,36 +22,69 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import type {
-	ClienteView,
+	ClientesPaginadas,
 	ParceiroDetalhe as ParceiroDetalheType,
 } from "../types";
+
+const POR_PAGINA = 20;
+
+interface Filtro {
+	busca: string;
+	cpfcnpj: string;
+	cidade: string;
+	uf: string;
+}
+
+const FILTRO_VAZIO: Filtro = { busca: "", cpfcnpj: "", cidade: "", uf: "" };
 
 export function ParceiroDetalhe() {
 	const { id } = useParams<{ id: string }>();
 	const [parceiro, setParceiro] = useState<ParceiroDetalheType | null>(null);
-	const [clientes, setClientes] = useState<ClienteView[] | null>(null);
 	const [erro, setErro] = useState<string | null>(null);
-	const [erroClientes, setErroClientes] = useState<string | null>(null);
 	const [carregando, setCarregando] = useState(true);
 
-	const carregar = useCallback(async () => {
-		if (!id) return;
-		setCarregando(true);
-		setErro(null);
-		setErroClientes(null);
-		try {
-			const p = await getParceiro(id);
-			setParceiro(p);
-			// Clientes é complementar — falha nele não derruba o detalhe.
-			const cl = await listClientes(p.id).catch((err: unknown) => {
+	const [filtro, setFiltro] = useState<Filtro>(FILTRO_VAZIO);
+	const [clientes, setClientes] = useState<ClientesPaginadas | null>(null);
+	const [erroClientes, setErroClientes] = useState<string | null>(null);
+	const [carregandoClientes, setCarregandoClientes] = useState(false);
+
+	const carregarClientes = useCallback(
+		async (parceiroId: number, f: Filtro, pagina: number) => {
+			setCarregandoClientes(true);
+			setErroClientes(null);
+			try {
+				const cl = await listClientes(parceiroId, {
+					pagina,
+					pageSize: POR_PAGINA,
+					busca: f.busca || undefined,
+					cpfcnpj: f.cpfcnpj || undefined,
+					cidade: f.cidade || undefined,
+					uf: f.uf || undefined,
+				});
+				setClientes(cl);
+			} catch (err) {
+				setClientes(null);
 				setErroClientes(
 					err instanceof ApiError
 						? err.mensagem
 						: "Não foi possível carregar os clientes.",
 				);
-				return null;
-			});
-			setClientes(cl);
+			} finally {
+				setCarregandoClientes(false);
+			}
+		},
+		[],
+	);
+
+	const carregar = useCallback(async () => {
+		if (!id) return;
+		setCarregando(true);
+		setErro(null);
+		try {
+			const p = await getParceiro(id);
+			setParceiro(p);
+			// Clientes é complementar — falha nele não derruba o detalhe.
+			void carregarClientes(p.id, FILTRO_VAZIO, 1);
 		} catch (err) {
 			setParceiro(null);
 			setClientes(null);
@@ -61,7 +96,7 @@ export function ParceiroDetalhe() {
 		} finally {
 			setCarregando(false);
 		}
-	}, [id]);
+	}, [id, carregarClientes]);
 
 	useEffect(() => {
 		void carregar();
@@ -84,6 +119,23 @@ export function ParceiroDetalhe() {
 	const p = parceiro;
 	if (!p) return null;
 	const e = p.endereco;
+
+	const temFiltro =
+		filtro.busca !== "" ||
+		filtro.cpfcnpj !== "" ||
+		filtro.cidade !== "" ||
+		filtro.uf !== "";
+	const paginaAtual = clientes?.page ?? 1;
+
+	const onSubmit = (ev: FormEvent) => {
+		ev.preventDefault();
+		void carregarClientes(p.id, filtro, 1);
+	};
+
+	const onLimpar = () => {
+		setFiltro(FILTRO_VAZIO);
+		void carregarClientes(p.id, FILTRO_VAZIO, 1);
+	};
 
 	return (
 		<div>
@@ -155,54 +207,154 @@ export function ParceiroDetalhe() {
 			</Card>
 
 			<h2 className="mb-3 text-lg font-semibold">Clientes</h2>
+
+			<form
+				className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-card p-4"
+				onSubmit={onSubmit}
+			>
+				<div className="flex min-w-[160px] max-w-[260px] flex-1 flex-col gap-1.5">
+					<Label>Nome / fantasia</Label>
+					<Input
+						placeholder="Busca por nome ou fantasia"
+						value={filtro.busca}
+						onChange={(ev) =>
+							setFiltro((f) => ({ ...f, busca: ev.target.value }))
+						}
+					/>
+				</div>
+				<div className="flex min-w-[160px] max-w-[220px] flex-1 flex-col gap-1.5">
+					<Label>CPF/CNPJ</Label>
+					<Input
+						placeholder="ex.: 529.982.247-25"
+						value={filtro.cpfcnpj}
+						onChange={(ev) =>
+							setFiltro((f) => ({ ...f, cpfcnpj: ev.target.value }))
+						}
+					/>
+				</div>
+				<div className="flex min-w-[160px] max-w-[220px] flex-1 flex-col gap-1.5">
+					<Label>Cidade</Label>
+					<Input
+						placeholder="ex.: Rio Rufino"
+						value={filtro.cidade}
+						onChange={(ev) =>
+							setFiltro((f) => ({ ...f, cidade: ev.target.value }))
+						}
+					/>
+				</div>
+				<div className="flex min-w-[80px] max-w-[100px] flex-col gap-1.5">
+					<Label>UF</Label>
+					<Input
+						placeholder="SC"
+						maxLength={2}
+						value={filtro.uf}
+						onChange={(ev) =>
+							setFiltro((f) => ({
+								...f,
+								uf: ev.target.value.toUpperCase().slice(0, 2),
+							}))
+						}
+					/>
+				</div>
+				<div className="ml-auto flex gap-2">
+					<Button type="submit" disabled={carregandoClientes}>
+						{carregandoClientes ? "Buscando…" : "Buscar"}
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						disabled={carregandoClientes || !temFiltro}
+						onClick={onLimpar}
+					>
+						Limpar
+					</Button>
+				</div>
+			</form>
+
 			{erroClientes && (
 				<Alert variant="destructive" className="mb-4">
 					<AlertDescription>{erroClientes}</AlertDescription>
 				</Alert>
 			)}
-			{clientes === null && !erroClientes && (
+			{clientes === null && !erroClientes && !carregandoClientes && (
 				<p className="text-muted-foreground">Clientes indisponíveis.</p>
 			)}
-			{clientes !== null && clientes.length === 0 && (
+			{carregandoClientes && (
+				<p className="text-muted-foreground">Carregando…</p>
+			)}
+			{!carregandoClientes && clientes !== null && clientes.total === 0 && (
 				<p className="text-muted-foreground">
-					Este parceiro não possui clientes ativos.
+					{temFiltro
+						? "Nenhum cliente encontrado para o filtro."
+						: "Este parceiro não possui clientes ativos."}
 				</p>
 			)}
-			{clientes !== null && clientes.length > 0 && (
-				<div className="overflow-x-auto rounded-lg border bg-card">
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Cliente</TableHead>
-								<TableHead>CPF/CNPJ</TableHead>
-								<TableHead>Cidade/UF</TableHead>
-								<TableHead>Linhas</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{clientes.map((c) => (
-								<TableRow key={c.id}>
-									<TableCell>
-										{c.nome}
-										{c.fantasia ? ` (${c.fantasia})` : ""}
-									</TableCell>
-									<TableCell>{c.cpfcnpj}</TableCell>
-									<TableCell>
-										{c.endereco.cidade}/{c.endereco.uf}
-									</TableCell>
-									<TableCell>
-										{c.linhas.map((l) => (
-											<div key={l.planoId}>
-												{l.descricao} · qtd {formatQtd(l.quantidade)} ·{" "}
-												<MoneyReais value={l.unitario} />
-											</div>
-										))}
-									</TableCell>
+			{!carregandoClientes && clientes !== null && clientes.itens.length > 0 && (
+				<>
+					<div className="overflow-x-auto rounded-lg border bg-card">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>Cliente</TableHead>
+									<TableHead>CPF/CNPJ</TableHead>
+									<TableHead>Cidade/UF</TableHead>
+									<TableHead>Linhas</TableHead>
 								</TableRow>
-							))}
-						</TableBody>
-					</Table>
-				</div>
+							</TableHeader>
+							<TableBody>
+								{clientes.itens.map((c) => (
+									<TableRow key={c.id}>
+										<TableCell>
+											{c.nome}
+											{c.fantasia ? ` (${c.fantasia})` : ""}
+										</TableCell>
+										<TableCell>{c.cpfcnpj}</TableCell>
+										<TableCell>
+											{c.endereco.cidade}/{c.endereco.uf}
+										</TableCell>
+										<TableCell>
+											{c.linhas.map((l) => (
+												<div key={l.planoId}>
+													{l.descricao} · qtd {formatQtd(l.quantidade)} ·{" "}
+													<MoneyReais value={l.unitario} />
+												</div>
+											))}
+										</TableCell>
+									</TableRow>
+								))}
+							</TableBody>
+						</Table>
+					</div>
+
+					{clientes.totalPaginas > 1 && (
+						<div className="mt-3 flex items-center justify-center gap-3">
+							<Button
+								variant="ghost"
+								size="sm"
+								disabled={paginaAtual <= 1}
+								onClick={() =>
+									void carregarClientes(p.id, filtro, paginaAtual - 1)
+								}
+							>
+								← Anterior
+							</Button>
+							<span className="text-muted-foreground">
+								Página {clientes.page} de {clientes.totalPaginas} (
+								{clientes.total} clientes)
+							</span>
+							<Button
+								variant="ghost"
+								size="sm"
+								disabled={paginaAtual >= clientes.totalPaginas}
+								onClick={() =>
+									void carregarClientes(p.id, filtro, paginaAtual + 1)
+								}
+							>
+								Próxima →
+							</Button>
+						</div>
+					)}
+				</>
 			)}
 		</div>
 	);

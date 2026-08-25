@@ -194,6 +194,28 @@ export interface ClienteView {
 	linhas: LinhaView[];
 }
 
+/** Filtros da lista de clientes do parceiro (query string do endpoint). */
+export interface ClientesFiltro {
+	/** Busca por nome/razão social ou fantasia (contém). */
+	busca?: string;
+	/** CPF/CNPJ exato (dígitos ou mascarado). */
+	cpfcnpj?: string;
+	/** Cidade exata. */
+	cidade?: string;
+	/** UF (2 letras). */
+	uf?: string;
+}
+
+/** Resultado paginado de GET /api/parceiros/:id/clientes. */
+export interface ClientesPaginadas {
+	itens: ClienteView[];
+	/** Total de clientes que casam com o filtro (todas as páginas). */
+	total: number;
+	page: number;
+	pageSize: number;
+	totalPaginas: number;
+}
+
 /** Body do POST /api/faturas/preparar. */
 export interface PrepararInput {
 	parceiroId: number;

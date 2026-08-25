@@ -9,7 +9,9 @@
  * - `appends` carrega relações na query.
  * - Destroy via POST `:destroy` (não DELETE HTTP).
  * - FKs enviadas duplicadas em creates aninhados (a coleção-alvo leva a FK).
- * - Paginação fake: `pageSize: 9999` p/ trazer tudo.
+ * - `list` faz paginação fake (`pageSize: 9999` — traz tudo); listagem
+ *   paginada de verdade com total do filtro é `listPage` (page/pageSize +
+ *   `meta.count` do envelope).
  *
  * O `fetch` é injetável p/ testes (mock). Em produção usa o global do Bun.
  */
@@ -43,11 +45,23 @@ export interface ListQuery {
 	filter?: Record<string, unknown>;
 	appends?: string[];
 	pageSize?: number;
+	page?: number;
+}
+
+/** Resultado de `listPage` — itens da página + total de registros do filtro. */
+export interface ListPageResult {
+	items: any[];
+	/** Total de registros que casam com o filtro (todas as páginas). */
+	total: number;
 }
 
 export interface AtacadoClient {
 	get(colecao: string, query: ListQuery): Promise<any>;
 	list(colecao: string, query: ListQuery): Promise<any[]>;
+	/** Listagem paginada de verdade (`page` + `pageSize` reais, sem o 9999).
+	 * `total` vem de `meta.count` do envelope NocoBase; sem `meta`, degrada p/
+	 * o tamanho da página (o caller deve tratar total como mínimo). */
+	listPage(colecao: string, query: ListQuery): Promise<ListPageResult>;
 	create(colecao: string, body: Record<string, unknown>): Promise<any>;
 	update(
 		colecao: string,
@@ -186,6 +200,31 @@ export function createAtacadoClient(
 			);
 			// NocoBase: resposta pode vir como { data: [...] } ou array direto
 			return Array.isArray(data) ? data : (data?.data ?? []);
+		},
+		async listPage(colecao, query) {
+			const { baseUrl, apiKey, app } = await resolveCreds();
+			// Sem o default pageSize: 9999 — paginação real (o caller manda
+			// page/pageSize). `filter` segue como JSON, `appends` como CSV.
+			const q = { page: 1, ...query } as Record<string, unknown>;
+			const data: any = await requestJson(
+				url(baseUrl, colecao, "list", q),
+				{
+					method: "GET",
+					headers: headers(apiKey, app),
+				},
+			);
+			// Envelope NocoBase: { data: [...], meta: { count, page, pageSize,
+			// totalPage } } — `meta.count` é o total DO FILTRO (verificado na
+			// instância). Sem `meta` (variações da API) degrada p/ tamanho da
+			// página — total vira piso, não exato.
+			const items: any[] = Array.isArray(data)
+				? data
+				: (data?.data ?? []);
+			const total =
+				typeof data?.meta?.count === "number"
+					? data.meta.count
+					: items.length;
+			return { items, total };
 		},
 		async create(colecao, body) {
 			const { baseUrl, apiKey, app } = await resolveCreds();

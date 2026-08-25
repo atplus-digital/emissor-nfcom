@@ -11,7 +11,7 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AtacadoPort, FiltroFaturas } from "#/domain/ports/atacado.port";
+import type { AtacadoPort, FiltroClientes, FiltroFaturas } from "#/domain/ports/atacado.port";
 import type { QueuePort } from "#/domain/ports/queue.port";
 import type { DefaultsFiscais } from "#/domain/fatura/defaults-fiscais";
 import {
@@ -25,7 +25,7 @@ import { prepararBodySchema } from "./faturas.route";
 import { emitirFatura } from "./emitir.handler";
 import { executarPreparacao, type PrepararInput } from "./preparar.handler";
 import {
-	serializarClienteLista,
+	serializarClienteListaPaginada,
 	serializarEmissaoPainel,
 	serializarFaturaDetalhe,
 	serializarFaturaLista,
@@ -59,6 +59,24 @@ const listQuerySchema = z.object({
 		.optional(),
 	status: z
 		.enum(["a-emitir", "emitindo", "emitida", "parcial", "erro", "pago", "cancelada"])
+		.optional(),
+});
+
+/**
+ * Query params de `GET /api/parceiros/:id/clientes` — paginação + filtros,
+ * todos opcionais (defaults: página 1, 20 itens). `uf` é o estado (2 letras);
+ * `cpfcnpj` aceita dígitos ou mascarado (o módulo normaliza).
+ */
+const clientesQuerySchema = z.object({
+	page: z.coerce.number().int().min(1).optional(),
+	pageSize: z.coerce.number().int().min(1).max(100).optional(),
+	busca: z.string().trim().min(1).max(120).optional(),
+	cpfcnpj: z.string().trim().min(1).max(30).optional(),
+	cidade: z.string().trim().min(1).max(80).optional(),
+	uf: z
+		.string()
+		.trim()
+		.length(2, "uf deve ter 2 letras")
 		.optional(),
 });
 
@@ -103,7 +121,9 @@ export function criarPainelDataRoutes(deps: PainelDataDeps): Hono {
 	});
 
 	// ============================================================
-	// GET /api/parceiros/:id/clientes (clientes ativos do parceiro)
+	// GET /api/parceiros/:id/clientes (clientes do parceiro — paginado
+	// com filtros opcionais; envelope { itens, total, page, pageSize,
+	// totalPaginas })
 	// ============================================================
 	app.get("/api/parceiros/:id/clientes", async (c) => {
 		const id = Number(c.req.param("id"));
@@ -111,8 +131,32 @@ export function criarPainelDataRoutes(deps: PainelDataDeps): Hono {
 			const { corpo, status } = erroResponse(TipoErro.VALIDACAO, "id inválido");
 			return c.json(corpo, status as ContentfulStatusCode);
 		}
-		const clientes = await atacado.buscarClientesAtivosPorParceiro(id);
-		return c.json(serializarClienteLista(clientes), 200);
+		const parsed = clientesQuerySchema.safeParse(c.req.query());
+		if (!parsed.success) {
+			const { corpo, status } = erroResponse(
+				TipoErro.VALIDACAO,
+				"Query inválida",
+				parsed.error.flatten() as Record<string, unknown>,
+			);
+			return c.json(corpo, status as ContentfulStatusCode);
+		}
+		const q = parsed.data;
+		const page = q.page ?? 1;
+		const pageSize = q.pageSize ?? 20;
+		// Só os campos presentes — o filtro ausente não filtra no NocoBase.
+		const filtro: FiltroClientes = {};
+		if (q.busca) filtro.busca = q.busca;
+		if (q.cpfcnpj) filtro.cpfcnpj = q.cpfcnpj;
+		if (q.cidade) filtro.cidade = q.cidade;
+		if (q.uf) filtro.uf = q.uf;
+		const { itens, total } = await atacado.listarClientesParceiro(id, filtro, {
+			page,
+			pageSize,
+		});
+		return c.json(
+			serializarClienteListaPaginada(itens, { total, page, pageSize }),
+			200,
+		);
 	});
 
 	// ============================================================

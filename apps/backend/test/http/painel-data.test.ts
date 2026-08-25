@@ -321,34 +321,85 @@ describe("GET /api/parceiros/:id — detalhe", () => {
 	});
 });
 
-describe("GET /api/parceiros/:id/clientes — clientes ativos", () => {
-	test("auth → 200 com cpfcnpj mascarado e linhas unitário em reais", async () => {
+describe("GET /api/parceiros/:id/clientes — clientes paginados", () => {
+	test("auth → 200 envelope paginado com cpfcnpj mascarado e linhas em reais", async () => {
+		// Fake padrão (clienteFixture: CPF_VALIDO, 1 linha a 10000 centavos).
+		const app = appData();
+		const res = await app.request("/api/parceiros/42/clientes", { headers: AUTH });
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.total).toBe(1);
+		expect(body.page).toBe(1);
+		expect(body.pageSize).toBe(20);
+		expect(body.totalPaginas).toBe(1);
+		expect(body.itens).toHaveLength(1);
+		expect(body.itens[0].cpfcnpj).toBe("529.982.247-25");
+		expect(body.itens[0].linhas).toEqual([
+			{ planoId: 100, descricao: "Plano 100Mbps", unitario: 100, quantidade: 1 },
+		]);
+		expect(body.itens[0].endereco.cidade).toBe("Curitiba");
+	});
+
+	test("query completa → listarClientesParceiro com filtro + paginação", async () => {
+		let args: any = null;
 		const app = appData(
 			fakeAtacado({
-				buscarClientesAtivosPorParceiro: async () => [
-					clienteFixture({ fantasia: "CF", linhas: [{ planoId: 100, descricao: "Plano 100Mbps", unitario: 10000, quantidade: 2 }] }),
-				],
+				listarClientesParceiro: async (...a: any[]) => {
+					args = a;
+					return { itens: [], total: 0 };
+				},
+			} as any),
+		);
+		const res = await app.request(
+			"/api/parceiros/42/clientes?page=3&pageSize=7&busca=joão&cpfcnpj=52998224725&cidade=Curitiba&uf=pr",
+			{ headers: AUTH },
+		);
+		expect(res.status).toBe(200);
+		expect(args).toEqual([
+			42,
+			{ busca: "joão", cpfcnpj: "52998224725", cidade: "Curitiba", uf: "pr" },
+			{ page: 3, pageSize: 7 },
+		]);
+	});
+
+	test("total > 1 página → totalPaginas arredonda p/ cima", async () => {
+		const app = appData(
+			fakeAtacado({
+				listarClientesParceiro: async () => ({ itens: [], total: 41 }),
+			} as any),
+		);
+		const res = await app.request("/api/parceiros/42/clientes?page=3&pageSize=20", { headers: AUTH });
+		const body = await res.json();
+		expect(body.totalPaginas).toBe(3);
+		expect(body.page).toBe(3);
+	});
+
+	test("parceiro sem clientes → 200 envelope vazio (itens [], total 0)", async () => {
+		const app = appData(
+			fakeAtacado({
+				listarClientesParceiro: async () => ({ itens: [], total: 0 }),
 			} as any),
 		);
 		const res = await app.request("/api/parceiros/42/clientes", { headers: AUTH });
 		expect(res.status).toBe(200);
-		const body = await res.json();
-		expect(body).toHaveLength(1);
-		expect(body[0].cpfcnpj).toBe("529.982.247-25");
-		expect(body[0].fantasia).toBe("CF");
-		expect(body[0].linhas).toEqual([
-			{ planoId: 100, descricao: "Plano 100Mbps", unitario: 100, quantidade: 2 },
-		]);
-		expect(body[0].endereco.cidade).toBe("Curitiba");
+		expect(await res.json()).toEqual({
+			itens: [],
+			total: 0,
+			page: 1,
+			pageSize: 20,
+			totalPaginas: 1,
+		});
 	});
 
-	test("parceiro sem clientes ativos → 200 []", async () => {
-		const app = appData(
-			fakeAtacado({ buscarClientesAtivosPorParceiro: async () => [] } as any),
-		);
-		const res = await app.request("/api/parceiros/42/clientes", { headers: AUTH });
-		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual([]);
+	test("query inválida (page=0 / pageSize=1000 / uf=x) → 422 VALIDACAO", async () => {
+		for (const qs of ["page=0", "pageSize=1000", "uf=x", "busca="]) {
+			const res = await appData().request(`/api/parceiros/42/clientes?${qs}`, {
+				headers: AUTH,
+			});
+			expect(res.status).toBe(422);
+			const body = await res.json();
+			expect(body.erro.tipo).toBe("VALIDACAO");
+		}
 	});
 
 	test("id inválido → 422; sem auth → 401", async () => {
