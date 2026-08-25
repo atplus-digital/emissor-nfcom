@@ -94,6 +94,7 @@ describe("criarApp (composition)", () => {
 			apiKey: "secret",
 			painelCookieSecret: "painel-secret",
 			authNocoBase,
+			inspecionarFilas: async () => ({ geradoEm: Date.now(), filas: [] }),
 		});
 		// Sessão inválida (sem cookie) → 401 NAO_AUTORIZADO — prova que o /painel
 		// sub-app foi montado (sem os deps, a rota cairia em 404).
@@ -109,6 +110,9 @@ describe("criarApp (composition)", () => {
 		});
 		expect(login.status).toBe(200);
 		expect(login.headers.get("set-cookie")).toContain("painel_sess");
+		// A rota de filas também existe quando o inspetor é injetado.
+		const filas = await app.request("/painel/api/filas");
+		expect(filas.status).toBe(401);
 	});
 
 	it("não monta /painel sem painelCookieSecret (painel opcional)", async () => {
