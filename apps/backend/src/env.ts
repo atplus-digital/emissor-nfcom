@@ -14,7 +14,7 @@ const _env = createEnv({
 
 		// Redis / BullMQ (ADR-0002)
 		REDIS_URL: z.url(),
-		
+
 		// Atacado (ADR-0004)
 		NOCOBASE_API_KEY: z.string().min(1),
 		NOCOBASE_API_URL: z.url(),
@@ -30,10 +30,18 @@ const _env = createEnv({
 		 */
 		PAINEL_COOKIE_SECRET: z.string().optional(),
 
+		/**
+		 * Path absoluto do `dist` do viewer buildado (Vite). Opcional: ausente →
+		 * o backend não serve o viewer (app segue como API-only). Em prod o
+		 * Dockerfile copia o build p/ /app/viewer e seta VIEWER_DIST=/app/viewer.
+		 * Em dev o vite dev-server (fora do compose) serve HMR — não usar esta var.
+		 */
+		VIEWER_DIST: z.string().optional(),
+
 		// Asaas (ADR-0004)
 		ASAAS_API_KEY: z.string().min(1),
 		ASAAS_API_URL: z.url(),
-		
+
 		// NFCom gateway (ADR-0001)
 		NFCOM_API_URL: z.url(),
 		NFCOM_LOGIN: z.string().min(1),
@@ -42,12 +50,12 @@ const _env = createEnv({
 		// Webhook de saída (SPEC-0001 passo 6; vazio = não empurra, caso 14)
 		WEBHOOK_URL: z.union([z.literal(""), z.url()]).default(""),
 		WEBHOOK_SECRET: z.string().default(""),
-		
+
 		// Rate-limit por gateway em req/s (ADR-0002)
 		RATE_LIMIT_ASAAS: z.coerce.number().positive().default(5),
 		RATE_LIMIT_NFCOM: z.coerce.number().positive().default(2),
 		RATE_LIMIT_ATACADO: z.coerce.number().positive().default(10),
-		
+
 		// Defaults fiscais (SPEC-0002; revisar com contador)
 		FISCAL_CFOP_DEFAULT: z.string().default("6307"),
 		FISCAL_CCLASS_DEFAULT: z.string().min(1),
@@ -60,7 +68,9 @@ const _env = createEnv({
 		FISCAL_IE_ISENTO: z.string().optional(),
 
 		// Logging (ADR-0008): nível default `info`, habilitável por env.
-		LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+		LOG_LEVEL: z
+			.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+			.default("info"),
 	},
 
 	/**
@@ -86,4 +96,3 @@ if (_env.WEBHOOK_URL && !_env.WEBHOOK_SECRET) {
 }
 
 export const env = _env;
-

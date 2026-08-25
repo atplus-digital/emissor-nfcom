@@ -29,6 +29,14 @@ COPY tsconfig.json ./
 COPY drizzle ./drizzle
 COPY drizzle.config.ts ./drizzle.config.ts
 RUN bun run build
+# Build do viewer (Vite → estáticos em apps/viewer/dist). O runtime os serve
+# via VIEWER_DIST=/app/viewer (mesmo origin do /painel → cookie HttpOnly ok).
+COPY apps/viewer/src ./apps/viewer/src
+COPY apps/viewer/index.html ./apps/viewer/index.html
+COPY apps/viewer/vite.config.ts ./apps/viewer/vite.config.ts
+COPY apps/viewer/tsconfig.json ./apps/viewer/tsconfig.json
+COPY apps/viewer/components.json ./apps/viewer/components.json
+RUN bun run viewer:build
 
 # ---------- Runtime stage ----------
 FROM oven/bun:1.3.14 AS runtime
@@ -40,6 +48,10 @@ ENV PORT=3000
 
 # Bundle compilado (autocontido: bun build --target bun embute as deps)
 COPY --from=build /app/dist ./dist
+# Estáticos do viewer (Vite build): servidos pelo próprio backend em
+# VIEWER_DIST=/app/viewer — mesmo origin do /painel (cookie HttpOnly ok).
+COPY --from=build /app/apps/viewer/dist /app/viewer
+ENV VIEWER_DIST=/app/viewer
 
 # drizzle-kit (runtime — roda as migrations do SQLite de coordenação, ADR-0003)
 COPY --from=build /app/node_modules ./node_modules

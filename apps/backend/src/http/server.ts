@@ -20,6 +20,7 @@ import { apiKeyMiddleware } from "#/http/middlewares/api-key";
 import { errorHandler } from "#/http/middlewares/error-handler";
 import { criarPainelSessionMiddleware } from "#/http/middlewares/painel-session";
 import { requestLogMiddleware } from "#/http/middlewares/request-log";
+import { criarViewerStatic } from "#/http/middlewares/viewer-static";
 import { criarFaturasRoutes } from "#/http/routes/faturas.route";
 import { criarHealthRoute, pingSqlite } from "#/http/routes/health.route";
 import { criarPainelAuthRoutes } from "#/http/routes/painel-auth.route";
@@ -59,6 +60,14 @@ export interface AppDeps {
 	 * ausente → a rota de filas não é montada (o painel segue sem ela).
 	 */
 	inspecionarFilas?: () => Promise<FilasSnapshot>;
+	/**
+	 * Path absoluto do `dist` do viewer buildado (Vite). Opcional: ausente →
+	 * o backend não serve o viewer (o app segue como antes, só API). Quando
+	 * informado, monta estáticos + fallback SPA **antes** do api-key — assim
+	 * rotas de SPA (`/login`, `/parceiros/...`) ficam públicas e a auth real
+	 * do painel é o cookie `/painel` (mesmo origin → cookie HttpOnly funciona).
+	 */
+	viewerDist?: string;
 }
 
 /**
@@ -78,6 +87,19 @@ export function criarApp(deps: AppDeps): Hono {
 	// Health é público (liveness — não exige auth; ADR-0002). O ping do SQLite é
 	// ligado quando o composition root injeta o `db`; senão liveness puro.
 	app.route("/", criarHealthRoute(deps.db ? pingSqlite(deps.db) : undefined));
+
+	// Viewer (SPA): serve estáticos + fallback index.html no MESMO origin do
+	// /painel (cookie HttpOnly SameSite=Lax funciona sem CORS). Montado ANTES do
+	// api-key p/ que rotas de SPA (/login, /parceiros/...) sejam públicas — a
+	// auth real do painel é o cookie /painel. Opcional: sem `viewerDist`, nada
+	// é servido (o app segue como API-only). O fallback só responde a GET com
+	// Accept: text/html em paths não reservados, então chamadas `fetch` de API
+	// (Accept json) passam adiante → api-key → rotas de API.
+	if (deps.viewerDist) {
+		const viewer = criarViewerStatic({ viewerDist: deps.viewerDist });
+		app.get("/assets/*", viewer.assetsHandler);
+		app.get("*", viewer.spaFallback);
+	}
 
 	// Painel de visualização (opcional): montado ANTES do api-key p/ não exigir
 	// X-API-Key — a auth é o cookie de sessão do NocoBase (painel_sess). Só

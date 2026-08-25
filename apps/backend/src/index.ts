@@ -119,6 +119,9 @@ async function main() {
 			ieIsento: env.FISCAL_IE_ISENTO,
 			// Painel de visualização (login NocoBase + cookie assinado).
 			painelCookieSecret: env.PAINEL_COOKIE_SECRET,
+			// Estáticos do viewer (build do Vite). Opcional: VIEWER_DIST ausente →
+			// o backend não serve o viewer (app segue como API-only).
+			viewerDist: env.VIEWER_DIST,
 			authNocoBase,
 			nocobaseAuthenticator: env.NOCOBASE_AUTHENTICATOR,
 			// LOG_LEVEL=debug/trace → detalhe de ERRO_INTERNO na resposta (diagnóstico).

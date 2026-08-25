@@ -45,6 +45,11 @@ services:
       # Dockerfile (DATABASE_URL=/app/data/emissor.db).
       DATABASE_URL: "/app/data/emissor.db"
       NODE_ENV: production
+      # Estáticos do viewer servidos pelo próprio backend (Dockerfile copia o
+      # build do Vite p/ /app/viewer). Mesmo origin do /painel → cookie HttpOnly
+      # SameSite=Lax funciona sem CORS. Ausente vira API-only (vazio/false aqui
+      # mantém o path fixo da imagem — só p/ documentar/override).
+      VIEWER_DIST: "/app/viewer"
     # Sem `ports`: porta exposta na rede do compose, alcançada pelo serviço
     # (ingress/lb externo) — não publicada no host. Se precisar mapear p/ a porta
     # do host, descomente e ajuste:

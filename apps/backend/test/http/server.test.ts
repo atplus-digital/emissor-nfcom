@@ -1,9 +1,12 @@
-import { describe, expect, mock, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Hono } from "hono";
-import { criarApp } from "#/http/server";
-import { requestLogMiddleware } from "#/http/middlewares/request-log";
-import { errorHandler } from "#/http/middlewares/error-handler";
 import type { AtacadoPort, QueuePort } from "#/domain/ports";
+import { errorHandler } from "#/http/middlewares/error-handler";
+import { requestLogMiddleware } from "#/http/middlewares/request-log";
+import { criarApp } from "#/http/server";
 import type { AuthNocoBaseClient } from "#/modules/atacado/translators/auth";
 
 const fakeAtacado = {} as AtacadoPort;
@@ -14,7 +17,11 @@ const fakeQueue = {
 
 describe("criarApp (composition)", () => {
 	it("GET /health responde 200 sem auth", async () => {
-		const app = criarApp({ atacado: fakeAtacado, queue: fakeQueue, apiKey: "k" });
+		const app = criarApp({
+			atacado: fakeAtacado,
+			queue: fakeQueue,
+			apiKey: "k",
+		});
 		const res = await app.request("/health");
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -22,11 +29,19 @@ describe("criarApp (composition)", () => {
 	});
 
 	it("POST /faturas/preparar sem X-API-Key → 401", async () => {
-		const app = criarApp({ atacado: fakeAtacado, queue: fakeQueue, apiKey: "secret" });
+		const app = criarApp({
+			atacado: fakeAtacado,
+			queue: fakeQueue,
+			apiKey: "secret",
+		});
 		const res = await app.request("/faturas/preparar", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ parceiroId: 1, dataReferencia: "2026-08-01", tipoFaturamento: "parceiro" }),
+			body: JSON.stringify({
+				parceiroId: 1,
+				dataReferencia: "2026-08-01",
+				tipoFaturamento: "parceiro",
+			}),
 		});
 		expect(res.status).toBe(401);
 		const body = await res.json();
@@ -34,17 +49,29 @@ describe("criarApp (composition)", () => {
 	});
 
 	it("POST /faturas/preparar com api key errada → 401", async () => {
-		const app = criarApp({ atacado: fakeAtacado, queue: fakeQueue, apiKey: "secret" });
+		const app = criarApp({
+			atacado: fakeAtacado,
+			queue: fakeQueue,
+			apiKey: "secret",
+		});
 		const res = await app.request("/faturas/preparar", {
 			method: "POST",
 			headers: { "content-type": "application/json", "x-api-key": "wrong" },
-			body: JSON.stringify({ parceiroId: 1, dataReferencia: "2026-08-01", tipoFaturamento: "parceiro" }),
+			body: JSON.stringify({
+				parceiroId: 1,
+				dataReferencia: "2026-08-01",
+				tipoFaturamento: "parceiro",
+			}),
 		});
 		expect(res.status).toBe(401);
 	});
 
 	it("POST /faturas/preparar com body inválido → 422 VALIDACAO (handler canônico, não 500)", async () => {
-		const app = criarApp({ atacado: fakeAtacado, queue: fakeQueue, apiKey: "secret" });
+		const app = criarApp({
+			atacado: fakeAtacado,
+			queue: fakeQueue,
+			apiKey: "secret",
+		});
 		// Body faltando campos obrigatórios → Zod invalida.
 		const res = await app.request("/faturas/preparar", {
 			method: "POST",
@@ -85,12 +112,83 @@ describe("criarApp (composition)", () => {
 	});
 
 	it("não monta /painel sem painelCookieSecret (painel opcional)", async () => {
-		const app = criarApp({ atacado: fakeAtacado, queue: fakeQueue, apiKey: "secret" });
+		const app = criarApp({
+			atacado: fakeAtacado,
+			queue: fakeQueue,
+			apiKey: "secret",
+		});
 		// Com a API key válida (passa o middleware global) não há rota /painel → 404.
 		const res = await app.request("/painel/api/session", {
 			headers: { "x-api-key": "secret" },
 		});
 		expect(res.status).toBe(404);
+	});
+
+	describe("viewer static (viewerDist opcional)", () => {
+		let viewerDir: string;
+
+		it("GET / com Accept html serve index.html quando viewerDist informado", async () => {
+			viewerDir = await mkdtemp(join(tmpdir(), "viewer-app-"));
+			await mkdir(join(viewerDir, "assets"), { recursive: true });
+			await writeFile(
+				join(viewerDir, "index.html"),
+				"<!doctype html><html>SPA</html>",
+			);
+			await writeFile(join(viewerDir, "assets", "app.js"), "console.log(1)");
+			const app = criarApp({
+				atacado: fakeAtacado,
+				queue: fakeQueue,
+				apiKey: "secret",
+				viewerDist: viewerDir,
+			});
+			const res = await app.request("/", { headers: { accept: "text/html" } });
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toContain("text/html");
+			expect(await res.text()).toContain("SPA");
+			// Asset público também.
+			const asset = await app.request("/assets/app.js");
+			expect(asset.status).toBe(200);
+			expect(asset.headers.get("content-type")).toContain("javascript");
+			await rm(viewerDir, { recursive: true, force: true });
+		});
+
+		it("GET /faturas/preparar (API) sem key continua 401 mesmo com viewerDist", async () => {
+			viewerDir = await mkdtemp(join(tmpdir(), "viewer-app-"));
+			await writeFile(join(viewerDir, "index.html"), "<html>SPA</html>");
+			const app = criarApp({
+				atacado: fakeAtacado,
+				queue: fakeQueue,
+				apiKey: "secret",
+				viewerDist: viewerDir,
+			});
+			// Accept json → não cai no fallback SPA → api-key → 401.
+			const res = await app.request("/faturas/preparar", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					accept: "application/json",
+				},
+				body: JSON.stringify({
+					parceiroId: 1,
+					dataReferencia: "2026-08-01",
+					tipoFaturamento: "parceiro",
+				}),
+			});
+			expect(res.status).toBe(401);
+			const body = await res.json();
+			expect(body.erro.tipo).toBe("NAO_AUTORIZADO");
+			await rm(viewerDir, { recursive: true, force: true });
+		});
+
+		it("sem viewerDist → GET / cai no api-key (401), não serve HTML", async () => {
+			const app = criarApp({
+				atacado: fakeAtacado,
+				queue: fakeQueue,
+				apiKey: "secret",
+			});
+			const res = await app.request("/", { headers: { accept: "text/html" } });
+			expect(res.status).toBe(401);
+		});
 	});
 
 	it("logLevel debug liga o detalhe de ERRO_INTERNO na resposta", async () => {
