@@ -16,6 +16,7 @@ casa-standard-ref: 7cdb964 # versão do casa-standard de origem — o casa-init 
 ## Contexto em 5 linhas
 
 <!-- O que este sistema é, pra quem, e qual o stack principal. Máximo 5 linhas. -->
+
 Emissor de **NFCom** (modelo 62 — comunicação/telecom). Orquestra fatura → cobrança
 (Asaas) → nota (gateway `api.nfcom.com.br` → SEFAZ) de forma assíncrona (BullMQ + Redis)
 com idempotência/outbox (SQLite). Stack: Bun + Hono + Drizzle + Zod 4. Interno ao AT+.
@@ -33,6 +34,9 @@ com idempotência/outbox (SQLite). Stack: Bun + Hono + Drizzle + Zod 4. Interno 
 - Migrations Drizzle: `bunx drizzle-kit generate` ao mudar `packages/db/src/schema.ts`; o SQL
   gerado é **revisado no PR**; `bunx drizzle-kit migrate` roda no boot do pod
   (idempotente).
+- Dev do banco: scripts `db:*` no `package.json` (`db:generate`, `db:migrate`, `db:push`,
+  `db:check`, `db:drop`, `db:introspect`, `db:studio`) rodam via `docker compose exec` no
+  container `app`. `db:studio` abre o Drizzle Studio em `http://localhost:${DB_STUDIO_PORT:-4983}`.
 
 ## Como rodar localmente
 
@@ -108,8 +112,8 @@ bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
 <!-- Índice dos capítulos (docs/context/), cada um com QUANDO carregar.
      Capítulo = estado atual, imperativo, atemporal. Decisão datada = ADR. -->
 
-| Capítulo | Quando carregar |
-| -------- | --------------- |
+| Capítulo                      | Quando carregar                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------- |
 | `docs/context/CONVENTIONS.md` | ao tocar envelope de erro, autorização, acesso a dados, ou variáveis de ambiente |
 
 ## Mapa de docs
@@ -118,6 +122,7 @@ bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
 - Validar: `scripts/docs-check` · Regenerar índices: `scripts/docs-check --emit-index`
 
 <!-- platon-workers:rules:start -->
+
 ## Platon Workers
 
 This machine has Platon Workers: headless coding subagents (MCP tools named platon_*) that run on Platon Inference with the user's key. Delegate to them by default when a task matches these classes:
@@ -130,6 +135,7 @@ This machine has Platon Workers: headless coding subagents (MCP tools named plat
 Do NOT delegate: trivial questions, single-file edits you can do faster yourself, tasks needing frequent user interaction, or anything whose spec you cannot write in one message.
 
 How to delegate well:
+
 - Write a complete, self-contained objective: goal, constraints, relevant paths, acceptance criteria. Workers cannot ask the user anything.
 - Prefer platon_start + platon_status polling + platon_result for anything over ~2 minutes; keep at most 3 workers running in parallel.
 - Reports separate environment facts (changed_files, command_results) from the model's own account (summary, findings, tests, confidence). Verify findings and diffs before relying on them.

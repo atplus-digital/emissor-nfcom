@@ -29,7 +29,14 @@
 		"spellcheck": "cspell .",
 		"secrets:check": "sh scripts/gitleaks-check",
 		"lint-staged": "lint-staged",
-		"generate:types": "bun ./scripts/nocobase/index.ts"
+		"generate:types": "bun ./scripts/nocobase/index.ts",
+		"db:generate": "bunx drizzle-kit generate",
+		"db:migrate": "docker compose -f docker-compose.dev.yaml exec --user bun app bunx drizzle-kit migrate",
+		"db:studio": "docker compose -f docker-compose.dev.yaml exec --user bun app bunx drizzle-kit studio --host 0.0.0.0",
+		"db:push": "docker compose -f docker-compose.dev.yaml exec --user bun app bunx drizzle-kit push",
+		"db:check": "docker compose -f docker-compose.dev.yaml exec --user bun app bunx drizzle-kit check",
+		"db:drop": "docker compose -f docker-compose.dev.yaml exec --user bun app bunx drizzle-kit drop",
+		"db:introspect": "docker compose -f docker-compose.dev.yaml exec --user bun app bunx drizzle-kit introspect"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.8",

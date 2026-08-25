@@ -52,6 +52,12 @@ services:
       # (ex: code-flow-runner em :3000). Host alcança a API em
       # http://localhost:${APP_PORT:-3333}.
       - "${APP_PORT:-3333}:3000"
+      # Drizzle Studio (db:studio) — porta do studio publicada no host p/ abrir a
+      # UI em http://localhost:${DB_STUDIO_PORT:-4983}. O studio roda dentro do
+      # container (db:studio = docker compose exec app bunx drizzle-kit studio);
+      # sem este port map a UI ficaria inalcançável do host. Recreate necessário
+      # se o stack já estiver de pé (docker compose up -d).
+      - "${DB_STUDIO_PORT:-4983}:4983"
     volumes:
       # Source montado para o `bun --watch` refletir edições locais a quente.
       - ./:/app
