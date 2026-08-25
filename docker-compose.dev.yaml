@@ -32,9 +32,12 @@ services:
       # Override do .env: dentro do compose o Redis é o serviço `redis`, não
       # localhost. Os demais secrets vêm do .env via env_file.
       REDIS_URL: redis://redis:6379
-      # O app escuta em env.PORT (default 3000, mas o .env local sobrescreve p/
-      # 4649). Forçamos 3000 para bater com o port map `3000:3000` abaixo e com
-      # o EXPOSE 3000 do Dockerfile — o host alcança a API em localhost:3000.
+      # Override do `.env`: no compose a porta INTERNA do container é fixa 3000
+      # (bateria com EXPOSE 3000 do Dockerfile, o healthcheck que aponta p/
+      # localhost:3000 e o serviço `tunnel`/`viewer` que alcançam o app via
+      # app:3000). A porta de HOST é controlada por APP_PORT (port map abaixo),
+      # NÃO por PORT. O `PORT` do `.env` só vale em `dev:native` (sem compose),
+      # onde o Hono escuta direto no host.
       PORT: "3000"
       # SQLite de coordenação num VOLUME nomeado (não no bind mount do source).
       # Se ficasse em ./data (dentro de ./:/app), o `bun --watch` veria cada
@@ -43,7 +46,12 @@ services:
       DATABASE_URL: "/app/data/emissor.db"
       NODE_ENV: development
     ports:
-      - "3000:3000"
+      # Host:container. Porta interna fixa 3000 (EXPOSE do Dockerfile / PORT
+      # interno forçado acima). Porta de HOST dinâmica via .env (APP_PORT,
+      # fallback 3333) p/ evitar colisão com outros dev servers no host
+      # (ex: code-flow-runner em :3000). Host alcança a API em
+      # http://localhost:${APP_PORT:-3333}.
+      - "${APP_PORT:-3333}:3000"
     volumes:
       # Source montado para o `bun --watch` refletir edições locais a quente.
       - ./:/app
@@ -81,6 +89,43 @@ services:
       timeout: 3s
       retries: 12
       start_period: 10s
+
+  # Viewer (Vite) — app de visualização de faturas/notas (apps/viewer). Sobe no
+  # mesmo `bun dev` que o app. Reusa a imagem buildada pelo serviço `app`: o
+  # Dockerfile.dev, com `linker = "hoisted"` (bunfig.toml), instala as deps do
+  # viewer no node_modules da raiz da imagem — sem rebuild/`bun install` extra.
+  viewer:
+    image: emissor-nfcom-app
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      # Proxy do Vite: /painel -> app (serviço interno do compose). O
+      # vite.config.ts lê esta var; no host (dev sem compose) vale o default
+      # http://localhost:3000.
+      VITE_PROXY_TARGET: "http://app:3000"
+    # Roda o binário `vite` do node_modules da imagem (hoisted) direto — sem
+    # passar pelo script `dev` do package.json (que fixa `--port 5850`) p/ não
+    # acumular flags conflitantes. Porta interna 5173 (canônica do container);
+    # a publicada no host vem do .env via VIEWER_PORT. `--host` expõe na rede
+    # interna p/ o tunnel e p/ o port map.
+    command: sh -c "cd /app/apps/viewer && /app/node_modules/.bin/vite --port 5173 --host"
+    ports:
+      # Host:container. Porta interna 5173 (Vite); porta de HOST via .env
+      # (VIEWER_PORT, fallback 3332). Host alcança o viewer em
+      # http://localhost:${VIEWER_PORT:-3332}.
+      - "${VIEWER_PORT:-3332}:5173"
+    volumes:
+      # Source montado p/ o Vite refletir edições locais a quente. Ao contrário
+      # do serviço `app`, NÃO usamos volume anônimo em /app/node_modules: ele
+      # incializa vazio (não copia da imagem) e esconderia as deps hoisted da
+      # imagem — o Vite então não resolve `@tailwindcss/vite` (importado por
+      # vite.config.ts) e falha ao carregar a config. Sem o volume, o
+      # node_modules da imagem fica visível (hoisted p/ todos os workspaces).
+      - ./:/app
+    depends_on:
+      app:
+        condition: service_healthy
 
   # Tunnel Cloudflare (quick tunnel, URL efêmera https://<id>.trycloudflare.com)
   # que expõe o dev-server publicamente — útil p/ compartilhar o preview com
