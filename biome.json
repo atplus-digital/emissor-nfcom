@@ -6,7 +6,13 @@
 	},
 	"files": {
 		"ignoreUnknown": true,
-		"includes": ["**", "!public"]
+		"includes": [
+			"**",
+			"!public",
+			"!docs/adr/README.md",
+			"!docs/specs/README.md",
+			"!docs/index.json"
+		]
 	},
 	"formatter": {
 		"enabled": true,

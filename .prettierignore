@@ -1,0 +1,6 @@
+# Arquivos GERADOS por scripts/docs-check — o formato canônico é o do gerador
+# (docs-check valida igualdade exata). Prettier NÃO deve reformatar estes
+# arquivos: a saída do gerador diverge do estilo do prettier.
+docs/adr/README.md
+docs/specs/README.md
+docs/index.json
