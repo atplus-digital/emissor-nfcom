@@ -84,6 +84,8 @@ bun run test:coverage    # gate de cobertura — REQUER Redis no ar (ver abaixo)
 - **Obrigatório**: volume persistente em `/app/data` (SQLite de coordenação — perdê-lo
   = perder a garantia anti-duplicação de boletos/notas, ADR-0003) e `REDIS_URL`
   apontando para um Redis durável (BullMQ perde jobs em Redis volátil, ADR-0002).
+- **Automatizado (Actions)**: `DEPLOY.yaml` dispara após CI verde na main (`workflow_run`)
+  → trigger EasyPanel + monitoração da action + healthcheck (`scripts/deploy-monitor.mjs`).
 
 ## Git & PRs
 

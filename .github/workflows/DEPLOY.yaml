@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  # O workflow só é INICIADO depois que o CI termina — sem "esperar" em job:
+  # workflow_run dispara quando o workflow CI completa (types: [completed]).
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  # Re-deploy manual pelo UI do Actions
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-easypanel
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy (EasyPanel compose)
+    # Deploy automático só quando o CI completou com sucesso num push na main;
+    # dispatch manual dispensa gate de CI.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'workflow_run'
+          && github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Secrets: Settings → Secrets and variables → Actions → Secrets
+      EASY_PANEL_KEY: ${{ secrets.EASY_PANEL_KEY }} # token Bearer (Painel → API → criar token)
+      # Variables: Settings → Secrets and variables → Actions → Variables
+      DEPLOY_TRIGGER_URL: ${{ vars.DEPLOY_TRIGGER_URL }} # URL de trigger (GET) do EasyPanel
+      EASY_PANEL_URL: ${{ vars.EASY_PANEL_URL }} # ex.: https://panel.exemplo.com
+      # Projeto/serviço fixos do pod (URL do painel: /projects/crm-2-production/compose/atacado-nfcom)
+      EASY_PANEL_PROJECT: crm-2-production
+      EASY_PANEL_SERVICE: atacado-nfcom
+      HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL }} # ex.: https://app.exemplo.com/health
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Trigger + monitorar deploy
+        # Fluxo: baseline de actions → GET no trigger → poll da action do deploy
+        # (falha a run se o deploy falhar/estourar timeout) → poll do /health.
+        run: node scripts/deploy-monitor.mjs
+
+      - name: Log do deploy (em falha)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: easypanel-deploy-log
+          path: deploy-failure.log
+          if-no-files-found: ignore
